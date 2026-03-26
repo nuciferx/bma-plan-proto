@@ -320,6 +320,10 @@ canvas{display:block}
   <h1>📐 PDF Scale</h1>
   <label id="upload-btn">📂 เปิด PDF<input id="file-input" type="file" accept=".pdf"></label>
   <div class="sep"></div>
+  <button class="tb-btn" id="btn-prev" onclick="if(curPage>1)loadPage(curPage-1)" title="หน้าก่อน (←)">◀</button>
+  <span id="page-lbl" style="font-size:11px;color:#e5e5e7;min-width:48px;text-align:center">— / —</span>
+  <button class="tb-btn" id="btn-next" onclick="if(curPage<totalPages)loadPage(curPage+1)" title="หน้าถัดไป (→)">▶</button>
+  <div class="sep"></div>
   <button class="tb-btn active" id="btn-pan"   onclick="setMode('pan')">✋ Pan</button>
   <button class="tb-btn"        id="btn-sel"   onclick="setMode('sel')">↖ เลือก</button>
   <button class="tb-btn"        id="btn-dist"  onclick="setMode('dist')">📏 ระยะ</button>
@@ -641,6 +645,9 @@ function updateThumbDot(n){
 async function loadPage(n){
   saveCurrentPage(); updateThumbDot(curPage);
   curPage=n; setThumbActive(n); setStatus("โหลดหน้า "+n+"…");
+  document.getElementById("page-lbl").textContent=n+" / "+totalPages;
+  document.getElementById("btn-prev").disabled=n<=1;
+  document.getElementById("btn-next").disabled=n>=totalPages;
   mPts=[];calibPts=[];
   calibPanel.style.display="none";
   snapTarget=null;snapCur.style.display="none";snapLbl.style.display="none";

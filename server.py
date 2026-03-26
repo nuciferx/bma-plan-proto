@@ -133,10 +133,13 @@ async def upload(file: UploadFile = File(...)):
 def get_page(n: int, scale: float = 1.5, rot: int = 0):
     doc = SESSION.get("doc")
     if not doc: return JSONResponse({"error":"no file"}, 400)
-    mat = fitz.Matrix(scale, scale).prerotate(rot)
-    pix = doc[n-1].get_pixmap(matrix=mat)
-    return StreamingResponse(io.BytesIO(pix.tobytes("jpeg", jpg_quality=88)),
-                             media_type="image/jpeg")
+    img_cache = SESSION.setdefault("image_cache", {})
+    key = (n, scale, rot)
+    if key not in img_cache:
+        mat = fitz.Matrix(scale, scale).prerotate(rot)
+        pix = doc[n-1].get_pixmap(matrix=mat)
+        img_cache[key] = pix.tobytes("jpeg", jpg_quality=88)
+    return Response(img_cache[key], media_type="image/jpeg")
 
 
 @app.get("/thumb/{n}")
@@ -185,6 +188,62 @@ def analyse(n: int, rot: int = 0):
     return Response(result_bytes, media_type="application/json")
 
 
+def _hex_to_rgb(h: str):
+    h = h.lstrip("#")
+    if len(h) != 6: return (1,1,0)
+    return tuple(int(h[i:i+2],16)/255 for i in (0,2,4))
+
+
+@app.post("/export-pdf")
+async def export_pdf(body: dict):
+    doc = SESSION.get("doc")
+    if not doc: return JSONResponse({"error":"no file"}, 400)
+    pages   = body.get("pages", [])
+    annots  = body.get("annotations", {})   # {str(page): {lines, polys}}
+    rotations = body.get("rotations", {})
+    pdf_name  = body.get("pdfName", "export")
+
+    new_doc = fitz.open()
+    for pg_num in pages:
+        idx = pg_num - 1
+        if idx < 0 or idx >= len(doc): continue
+        new_doc.insert_pdf(doc, from_page=idx, to_page=idx)
+        page = new_doc[len(new_doc)-1]
+        pg_annots = annots.get(str(pg_num), {})
+
+        for ln in pg_annots.get("lines", []):
+            try:
+                col = _hex_to_rgb(ln.get("color","#ffd60a"))
+                p1  = fitz.Point(ln["x0"], ln["y0"])
+                p2  = fitz.Point(ln["x1"], ln["y1"])
+                page.draw_line(p1, p2, color=col, width=1.5, dashes="[6 3]")
+                lbl = f"{ln['dist']:.2f} m" if ln.get("dist") else f"{ln['ptDist']:.1f} pt"
+                page.insert_text(fitz.Point((ln["x0"]+ln["x1"])/2,
+                                            (ln["y0"]+ln["y1"])/2-5),
+                                 lbl, fontsize=7, color=col)
+            except Exception: pass
+
+        for poly in pg_annots.get("polys", []):
+            if not poly.get("closed"): continue
+            try:
+                col  = _hex_to_rgb(poly.get("color","#30d158"))
+                pts  = [fitz.Point(p["x"],p["y"]) for p in poly["pts"]]
+                page.draw_polygon(pts, color=col, fill=col, fill_opacity=0.08, width=1.5)
+                cx   = sum(p["x"] for p in poly["pts"])/len(poly["pts"])
+                cy   = sum(p["y"] for p in poly["pts"])/len(poly["pts"])
+                rows = []
+                if poly.get("name"):  rows.append(poly["name"])
+                if poly.get("area"):  rows.append(f"{poly['area']:.2f} sq.m")
+                for i,t in enumerate(rows):
+                    page.insert_text(fitz.Point(cx, cy+i*9-4), t, fontsize=7, color=col)
+            except Exception: pass
+
+    buf = io.BytesIO()
+    new_doc.save(buf)
+    new_doc.close()
+    safe = pdf_name.replace("/","_").replace("\\","_").replace(".pdf","")
+    return Response(buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_export.pdf"'})
 
 
 
@@ -313,6 +372,32 @@ canvas{display:block}
            border-radius:7px;border:1px solid rgba(255,255,255,.1);
            background:rgba(255,255,255,.05);color:#98989f;text-align:center}
 .atype-btn.sel{background:rgba(10,132,255,.18);border-color:#0a84ff;color:#0a84ff}
+/* page manager modal */
+#pgmgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:700;display:none;
+               align-items:center;justify-content:center}
+#pgmgr-overlay.open{display:flex}
+#pgmgr-box{background:#2c2c2e;border:1px solid #48484a;border-radius:14px;
+           padding:20px;width:min(90vw,820px);max-height:85vh;display:flex;
+           flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#pgmgr-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#pgmgr-header h3{font-size:13px;font-weight:700;flex:1}
+#pgmgr-sel-info{font-size:11px;color:#98989f;min-width:80px}
+.pgmgr-hbtn{padding:5px 12px;font-size:11px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e5e5e7}
+.pgmgr-hbtn:hover{background:rgba(255,255,255,.13)}
+.pgmgr-hbtn.primary{background:#0a84ff;border-color:#0a84ff;color:#fff}
+.pgmgr-hbtn.primary:hover{background:#0071e3}
+.pgmgr-hbtn.danger{color:#ff453a;border-color:rgba(255,69,58,.3)}
+#pgmgr-grid{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding:4px 2px;flex:1}
+.pgmgr-cell{width:90px;cursor:pointer;border-radius:8px;border:2px solid transparent;
+            padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;
+            background:rgba(255,255,255,.04);transition:border-color .15s,background .15s;
+            user-select:none}
+.pgmgr-cell:hover{background:rgba(255,255,255,.08)}
+.pgmgr-cell.sel{border-color:#0a84ff;background:rgba(10,132,255,.15)}
+.pgmgr-cell img{width:100%;border-radius:4px;background:#333;pointer-events:none}
+.pgmgr-cell span{font-size:10px;color:#98989f}
+.pgmgr-cell.sel span{color:#e5e5e7}
+.pgmgr-footer{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #3a3a3c}
 </style>
 </head>
 <body>
@@ -363,6 +448,11 @@ canvas{display:block}
   <div class="sep"></div>
   <button class="tb-btn" onclick="exportCSV()">⬇ CSV</button>
   <button class="tb-btn" onclick="exportJSON()">⬇ JSON</button>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-undo" onclick="undo()" title="Undo (Ctrl+Z)">↩ Undo</button>
+  <button class="tb-btn" onclick="openPageManager()" title="จัดการหน้า / บันทึก PDF">📄 หน้า</button>
+  <button class="tb-btn" onclick="saveProject()" title="บันทึกโปรเจกต์ (.bmaplan)">💾 บันทึก</button>
+  <label class="tb-btn" style="cursor:pointer" title="โหลดโปรเจกต์ (.bmaplan)">📂 โหลด<input id="proj-input" type="file" accept=".bmaplan" style="display:none"></label>
   <span id="status" style="margin-left:4px"></span>
 </div>
 <div id="body">
@@ -418,6 +508,25 @@ canvas{display:block}
   <div class="ctx-item del" onclick="ctxDelete()">🗑 ลบ</div>
 </div>
 
+<!-- page manager overlay -->
+<div id="pgmgr-overlay" onclick="if(event.target===this)closePgMgr()">
+  <div id="pgmgr-box" onclick="event.stopPropagation()">
+    <div id="pgmgr-header">
+      <h3>📄 จัดการหน้า</h3>
+      <span id="pgmgr-sel-info">เลือก 0 หน้า</span>
+      <button class="pgmgr-hbtn" onclick="pgmgrSelectAll()">เลือกทั้งหมด</button>
+      <button class="pgmgr-hbtn" onclick="pgmgrClearAll()">ยกเลิก</button>
+      <button class="pgmgr-hbtn danger" onclick="closePgMgr()">✕</button>
+    </div>
+    <div id="pgmgr-grid"></div>
+    <div class="pgmgr-footer">
+      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(false)">⬇ Save PDF (หน้าที่เลือก)</button>
+      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(true)">⬇ PDF + annotations</button>
+      <button class="pgmgr-hbtn" onclick="saveProject()">💾 บันทึกโปรเจกต์</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── state ──────────────────────────────────────────────
 let totalPages=0, curPage=1, pageData=null;
@@ -437,6 +546,11 @@ let snapModes={ep:true,mp:true,ct:true,nl:false,ix:false,off:false};
 let curColor="#30d158", curOpacity=0.85, curAType="room";
 let selItem=null;    // {type:'line'|'poly', idx}
 let dragState=null;  // {type, idx, startPdf, origData}
+let undoStack=[];
+let spaceDown=false, preSpaceMode="pan";
+let currentFileName="";
+let pgmgrSel=new Set();   // selected page numbers in page manager
+let pgmgrLastClick=null;
 
 const canvas    = document.getElementById("canvas");
 const ctx       = canvas.getContext("2d");
@@ -488,6 +602,21 @@ function hexAlpha(hex,a){
   return`rgba(${r},${g},${b},${a})`;
 }
 document.addEventListener("click",()=>ctxMenu.style.display="none");
+
+// ── undo ───────────────────────────────────────────────
+function pushUndo(){
+  undoStack.push({
+    lines:JSON.parse(JSON.stringify(mLines)),
+    polys:JSON.parse(JSON.stringify(mPolys))
+  });
+  if(undoStack.length>60)undoStack.shift();
+}
+function undo(){
+  if(!undoStack.length){setStatus("ไม่มีอะไรให้ Undo");return;}
+  const s=undoStack.pop();
+  mLines=s.lines; mPolys=s.polys;
+  saveCurrentPage(); redraw(); setStatus("↩ Undo");
+}
 
 // ── zoom buttons ───────────────────────────────────────
 function adjustZoom(factor){
@@ -612,7 +741,7 @@ document.getElementById("file-input").addEventListener("change",async e=>{
   const fd=new FormData();fd.append("file",file);
   const res=await fetch("/upload",{method:"POST",body:fd});
   const d=await res.json();
-  totalPages=d.pages;
+  totalPages=d.pages; currentFileName=file.name;
   buildThumbs(totalPages);
   await loadPage(1);
 });
@@ -659,7 +788,7 @@ async function loadPage(n){
   await new Promise(res=>{
     const img=new Image();
     img.onload=()=>{bgImg=img;canvas.width=img.width;canvas.height=img.height;res();};
-    img.src=`/page/${n}?scale=${RS}&rot=${rot}&t=${Date.now()}`;
+    img.src=`/page/${n}?scale=${RS}&rot=${rot}`;
   });
   fitToWindow();redraw();
   if(analyseCache[n]){pageData=analyseCache[n];updateAnalyseUI(pageData);}
@@ -978,7 +1107,7 @@ ws.addEventListener("mousedown",e=>{
     }
     redraw();return;
   }
-  if(mode==="pan"||e.button===1){
+  if(mode==="pan"||e.button===1||spaceDown){
     isPan=true;lastMx=e.clientX;lastMy=e.clientY;ws.style.cursor="grabbing";return;
   }
   const {x:cx,y:cy}=cXY(e);
@@ -994,6 +1123,7 @@ ws.addEventListener("mousedown",e=>{
       const ptD=Math.hypot(mPts[1].x-mPts[0].x,mPts[1].y-mPts[0].y);
       const base={x0:mPts[0].x,y0:mPts[0].y,x1:mPts[1].x,y1:mPts[1].y,
                   ptDist:ptD,id:nid(),color:curColor,opacity:curOpacity};
+      pushUndo();
       if(dist!=null){
         mLines.push({...base,dist});
         document.getElementById("measure-result").textContent="📏 "+dist.toFixed(3)+" ม.";
@@ -1011,6 +1141,7 @@ ws.addEventListener("mousedown",e=>{
         curAType="room"; setAType("room");
         const poly={pts:[...mPts],closed:true,area,name:"",areaType:"room",
                     id:nid(),color:curColor,opacity:curOpacity};
+        pushUndo();
         mPolys.push(poly);
         if(area!=null)
           document.getElementById("measure-result").textContent=
@@ -1101,6 +1232,7 @@ function ctxOpacity(v){
 }
 function ctxDelete(){
   if(!ctxTarget)return;
+  pushUndo();
   if(ctxTarget.type==="line") mLines.splice(ctxTarget.idx,1);
   else mPolys.splice(ctxTarget.idx,1);
   ctxTarget=null;redraw();
@@ -1207,9 +1339,10 @@ ws.addEventListener("mousemove",e=>{
   redraw();
 });
 ws.addEventListener("mouseup",()=>{
+  if(dragState){pushUndo();saveCurrentPage();}
   isPan=false;
   dragState=null;
-  ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
+  ws.style.cursor=spaceDown?"grab":mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
 });
 ws.addEventListener("mouseleave",()=>{
   isPan=false;dragState=null;snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;
@@ -1300,15 +1433,23 @@ function dlBlob(blob,name){
 
 // ── keyboard ───────────────────────────────────────────
 document.addEventListener("keydown",e=>{
+  if(e.key===" "&&!spaceDown&&e.target.tagName!=="INPUT"){
+    e.preventDefault();
+    spaceDown=true; preSpaceMode=mode;
+    ws.style.cursor="grab"; return;
+  }
   if(e.target.tagName==="INPUT")return;
+  if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();undo();return;}
   if(e.key==="ArrowRight"&&curPage<totalPages)loadPage(curPage+1);
   if(e.key==="ArrowLeft"&&curPage>1)loadPage(curPage-1);
   if(e.key==="Escape"){
     setMode("pan");
     namePanel.style.display="none";
     ctxMenu.style.display="none";
+    closePgMgr();
   }
   if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){
+    pushUndo();
     if(selItem.type==="line") mLines.splice(selItem.idx,1);
     else mPolys.splice(selItem.idx,1);
     selItem=null;dragState=null;redraw();
@@ -1316,8 +1457,103 @@ document.addEventListener("keydown",e=>{
   if(e.key==="f"||e.key==="F")fitToWindow();
   if(e.key==="Delete"&&ctxTarget)ctxDelete();
 });
+document.addEventListener("keyup",e=>{
+  if(e.key===" "&&spaceDown){
+    spaceDown=false;
+    ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
+  }
+});
 function setStatus(t){document.getElementById("status").textContent=t;}
 window.addEventListener("resize",()=>{if(bgImg)fitToWindow();});
+
+// ── page manager ───────────────────────────────────────
+function openPageManager(){
+  if(!totalPages){alert("เปิด PDF ก่อน");return;}
+  const overlay=document.getElementById("pgmgr-overlay");
+  const grid=document.getElementById("pgmgr-grid");
+  grid.innerHTML="";
+  if(!pgmgrSel.size){for(let i=1;i<=totalPages;i++)pgmgrSel.add(i);}
+  for(let i=1;i<=totalPages;i++){
+    const cell=document.createElement("div");
+    cell.className="pgmgr-cell"+(pgmgrSel.has(i)?" sel":"");
+    cell.dataset.page=i;
+    cell.innerHTML=`<img src="/thumb/${i}" loading="lazy"><span>หน้า ${i}</span>`;
+    cell.addEventListener("click",e=>pgmgrClickCell(i,e));
+    grid.appendChild(cell);
+  }
+  pgmgrUpdateInfo();
+  overlay.classList.add("open");
+}
+function closePgMgr(){
+  document.getElementById("pgmgr-overlay").classList.remove("open");
+}
+function pgmgrClickCell(i,e){
+  if(e.shiftKey&&pgmgrLastClick!=null){
+    const lo=Math.min(pgmgrLastClick,i), hi=Math.max(pgmgrLastClick,i);
+    const allSel=[...Array(hi-lo+1)].map((_,k)=>lo+k).every(p=>pgmgrSel.has(p));
+    for(let p=lo;p<=hi;p++) allSel?pgmgrSel.delete(p):pgmgrSel.add(p);
+  }else{
+    pgmgrSel.has(i)?pgmgrSel.delete(i):pgmgrSel.add(i);
+  }
+  pgmgrLastClick=i;
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>{
+    c.classList.toggle("sel",pgmgrSel.has(+c.dataset.page));
+  });
+  pgmgrUpdateInfo();
+}
+function pgmgrSelectAll(){
+  for(let i=1;i<=totalPages;i++)pgmgrSel.add(i);
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.add("sel"));
+  pgmgrUpdateInfo();
+}
+function pgmgrClearAll(){
+  pgmgrSel.clear();
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.remove("sel"));
+  pgmgrUpdateInfo();
+}
+function pgmgrUpdateInfo(){
+  document.getElementById("pgmgr-sel-info").textContent=`เลือก ${pgmgrSel.size} / ${totalPages} หน้า`;
+}
+async function pgmgrExportPDF(withAnnotations){
+  if(!pgmgrSel.size){alert("เลือกหน้าก่อน");return;}
+  const pages=[...pgmgrSel].sort((a,b)=>a-b);
+  saveCurrentPage();
+  const body={pages, pdfName:currentFileName, rotations:pageRotations};
+  if(withAnnotations) body.annotations=pageStore;
+  setStatus("กำลัง export…");
+  const r=await fetch("/export-pdf",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){setStatus("export ล้มเหลว");return;}
+  const blob=await r.blob();
+  const safe=currentFileName.replace(/\.pdf$/i,"");
+  dlBlob(blob,(safe||"export")+`_p${pages.join("-")}.pdf`);
+  setStatus(`✅ export ${pages.length} หน้า`);
+}
+
+// ── save / load project ────────────────────────────────
+function saveProject(){
+  if(!totalPages){alert("เปิด PDF ก่อน");return;}
+  saveCurrentPage();
+  const proj={version:1,pdfName:currentFileName,totalPages,
+              pageStore,pageRotations};
+  const safe=currentFileName.replace(/\.pdf$/i,"")||"project";
+  dlBlob(new Blob([JSON.stringify(proj,null,2)],{type:"application/json"}),safe+".bmaplan");
+  setStatus("💾 บันทึกแล้ว");
+}
+document.getElementById("proj-input").addEventListener("change",async e=>{
+  const file=e.target.files[0]; if(!file)return;
+  e.target.value="";
+  try{
+    const text=await file.text();
+    const proj=JSON.parse(text);
+    if(proj.version!==1)throw new Error("version ไม่รองรับ");
+    pageStore=proj.pageStore||{};
+    pageRotations=proj.pageRotations||{};
+    restorePage(curPage);
+    redraw();
+    setStatus("📂 โหลด "+file.name+" แล้ว");
+  }catch(err){alert("โหลดไม่ได้: "+err.message);}
+});
 </script>
 </body>
 </html>"""

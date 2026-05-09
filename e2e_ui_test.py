@@ -377,7 +377,22 @@ def _test_main_measurement_ui_cleanup(page):
                 cssLinkPresent: !!document.querySelector('link[href="/static/css/app.css"]'),
                 cssVarLoaded: !!getComputedStyle(document.documentElement).getPropertyValue("--blue").trim(),
                 semanticMetaJsLoaded: typeof AREA_SEMANTIC_TAGS !== "undefined",
-                openingParentJsLoaded: typeof openingProbePoints !== "undefined"
+                openingParentJsLoaded: typeof openingProbePoints !== "undefined",
+                inspectionPanelVisible: isVisible(document.querySelector("#inspection-panel")),
+                inspectionPanelInSidebar: !!document.querySelector("#sidebar #inspection-panel"),
+                inspectionPanelNotInCanvas: !document.querySelector("#cc #inspection-panel"),
+                inspectionPanelWorkflowVisible: !!document.querySelector("#isp-body .isp-wf-row"),
+                inspectionPanelContextVisible: !!document.querySelector("#isp-body .isp-section-title"),
+                inspectionPanelToggleWorks: (()=>{
+                    const body = document.getElementById("isp-body");
+                    if (!body) return false;
+                    const wasBefore = body.classList.contains("collapsed");
+                    toggleInspectionPanel();
+                    const afterToggle = body.classList.contains("collapsed");
+                    toggleInspectionPanel();
+                    const afterRestore = body.classList.contains("collapsed");
+                    return (afterToggle !== wasBefore) && (afterRestore === wasBefore);
+                })()
             };
         }"""
     )
@@ -437,6 +452,18 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"AREA_SEMANTIC_TAGS undefined: semantic-meta.js may not have loaded: {result}")
     if not result.get("openingParentJsLoaded"):
         raise AssertionError(f"openingProbePoints undefined: opening-parent.js may not have loaded: {result}")
+    if not result.get("inspectionPanelVisible"):
+        raise AssertionError(f"Left Inspection Status Panel (#inspection-panel) is not visible: {result}")
+    if not result.get("inspectionPanelInSidebar"):
+        raise AssertionError(f"Inspection panel is not inside #sidebar: {result}")
+    if not result.get("inspectionPanelNotInCanvas"):
+        raise AssertionError(f"Inspection panel must not be inside #cc (canvas area): {result}")
+    if not result.get("inspectionPanelWorkflowVisible"):
+        raise AssertionError(f"Inspection panel workflow rows (.isp-wf-row) not found in body: {result}")
+    if not result.get("inspectionPanelContextVisible"):
+        raise AssertionError(f"Inspection panel context section title not found: {result}")
+    if not result.get("inspectionPanelToggleWorks"):
+        raise AssertionError(f"Inspection panel collapse/expand toggle does not work: {result}")
     for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")

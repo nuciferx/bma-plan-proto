@@ -373,7 +373,11 @@ def _test_main_measurement_ui_cleanup(page):
                 scaleStatusWidgetVisible: isVisible(document.querySelector("#scale-badge")),
                 pageInfoWidgetVisible: isVisible(document.querySelector("#lp-page-info")),
                 reviewWarningWidgetVisible: isVisible(document.querySelector("#widget-review-warnings")),
-                exportReadyWidgetVisible: isVisible(document.querySelector("#widget-export-ready"))
+                exportReadyWidgetVisible: isVisible(document.querySelector("#widget-export-ready")),
+                cssLinkPresent: !!document.querySelector('link[href="/static/css/app.css"]'),
+                cssVarLoaded: !!getComputedStyle(document.documentElement).getPropertyValue("--blue").trim(),
+                semanticMetaJsLoaded: typeof AREA_SEMANTIC_TAGS !== "undefined",
+                openingParentJsLoaded: typeof openingProbePoints !== "undefined"
             };
         }"""
     )
@@ -425,6 +429,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"review warning widget (#widget-review-warnings) not visible: {result}")
     if not result.get("exportReadyWidgetVisible"):
         raise AssertionError(f"export ready widget (#widget-export-ready) not visible: {result}")
+    if not result.get("cssLinkPresent"):
+        raise AssertionError(f"CSS <link> for /static/css/app.css not found in DOM: {result}")
+    if not result.get("cssVarLoaded"):
+        raise AssertionError(f"CSS variable --blue not set: app.css may not have loaded: {result}")
+    if not result.get("semanticMetaJsLoaded"):
+        raise AssertionError(f"AREA_SEMANTIC_TAGS undefined: semantic-meta.js may not have loaded: {result}")
+    if not result.get("openingParentJsLoaded"):
+        raise AssertionError(f"openingProbePoints undefined: opening-parent.js may not have loaded: {result}")
     for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")

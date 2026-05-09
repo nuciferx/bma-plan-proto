@@ -5,6 +5,7 @@ server.py — PDF Scale Backend v4
 """
 import io, math, re, json, tempfile, os, time
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
@@ -36,9 +37,9 @@ from export.xlsx_helpers import (
 
 app = FastAPI()
 
-_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(_STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 CASES: dict = {}
 PT_PER_MM = 72 / 25.4

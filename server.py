@@ -22,6 +22,17 @@ try:
 except ImportError:
     HAS_XLSX = False
 
+from export.semantic_metadata import (
+    AREA_SEMANTIC_TAGS,
+    SEMANTIC_PROFILE_MAP, SEMANTIC_CATEGORY_MAP, SEMANTIC_REPORT_TARGET_MAP,
+    SEMANTIC_LAW_BASIS_MAP, SEMANTIC_COUNTING_RULE_MAP,
+    _derive_measurement_meta, _get_meta,
+)
+from export.xlsx_helpers import (
+    _hex_to_rgb, _poly_area_pt2, _line_points, _line_length_pt,
+    _nearest_on_segment, _object_points_for_ref_report, _distance_to_ref, _m2_to_rwu,
+)
+
 app = FastAPI()
 
 CASES: dict = {}
@@ -520,71 +531,6 @@ def analyse(n: int, case_id: str, rot: int = 0):
     return Response(result_bytes, media_type="application/json")
 
 
-def _hex_to_rgb(h: str):
-    h = h.lstrip("#")
-    if len(h) != 6: return (1,1,0)
-    return tuple(int(h[i:i+2],16)/255 for i in (0,2,4))
-
-
-def _poly_area_pt2(pts: list[dict]) -> float:
-    if len(pts) < 3:
-        return 0.0
-    area = 0.0
-    for i, p1 in enumerate(pts):
-        p2 = pts[(i + 1) % len(pts)]
-        area += p1["x"] * p2["y"] - p2["x"] * p1["y"]
-    return abs(area) / 2.0
-
-
-def _line_points(obj: dict) -> list[dict]:
-    pts = obj.get("pts")
-    if isinstance(pts, list) and len(pts) >= 2:
-        return pts
-    if all(k in obj for k in ("x0", "y0", "x1", "y1")):
-        return [{"x": obj["x0"], "y": obj["y0"]}, {"x": obj["x1"], "y": obj["y1"]}]
-    return []
-
-
-def _line_length_pt(pts: list[dict]) -> float:
-    total = 0.0
-    for p1, p2 in zip(pts, pts[1:]):
-        total += math.hypot(p2["x"] - p1["x"], p2["y"] - p1["y"])
-    return total
-
-
-def _nearest_on_segment(px, py, ax, ay, bx, by):
-    dx = bx - ax
-    dy = by - ay
-    denom = dx * dx + dy * dy
-    if denom <= 1e-9:
-        return ax, ay, math.hypot(px - ax, py - ay)
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / denom))
-    x = ax + t * dx
-    y = ay + t * dy
-    return x, y, math.hypot(px - x, py - y)
-
-
-def _object_points_for_ref_report(kind: str, obj: dict) -> list[tuple[float, float, str]]:
-    if kind == "parking":
-        return [(obj.get("x", 0), obj.get("y", 0), "marker")]
-    if kind in ("line", "ref"):
-        return [(p["x"], p["y"], f"จุด {i+1}") for i, p in enumerate(_line_points(obj))]
-    pts = obj.get("pts") or []
-    out = [(p["x"], p["y"], f"มุม {i+1}") for i, p in enumerate(pts)]
-    if pts:
-        out.append((sum(p["x"] for p in pts) / len(pts), sum(p["y"] for p in pts) / len(pts), "กึ่งกลาง"))
-    return out
-
-
-def _distance_to_ref(pt, ref: dict):
-    best = None
-    for p1, p2 in zip(_line_points(ref), _line_points(ref)[1:]):
-        x, y, d = _nearest_on_segment(pt[0], pt[1], p1["x"], p1["y"], p2["x"], p2["y"])
-        if best is None or d < best["dist_pt"]:
-            best = {"x": x, "y": y, "dist_pt": d, "point_role": pt[2]}
-    return best
-
-
 @app.post("/export-pdf")
 async def export_pdf(body: dict):
     case = _get_case(body.get("case_id", ""))
@@ -718,76 +664,6 @@ TAG_LABELS = {
     "schedule": "ตาราง",
     "other": "อื่น ๆ",
 }
-
-AREA_SEMANTIC_TAGS = {"gross_floor_area", "floor_area", "use_area"}
-
-SEMANTIC_PROFILE_MAP = {
-    "site_land_area": "site_land_area", "site_boundary": "site_boundary",
-    "building_footprint": "building_footprint", "gross_floor_area": "legal_building_area",
-    "floor_area": "use_area", "use_area": "use_area", "parking_area": "parking_area",
-    "deduction_opening": "deduction_area", "void": "deduction_area",
-    "legal_open_space": "legal_open_space", "setback_measure_line": "setback_measure_line",
-    "dimension_line": "dimension_line", "reference_line": "reference_line",
-    "road_line": "reference_line", "frontage_line": "reference_line",
-    "scale_line": "scale_line", "north_arrow": "north_arrow",
-    "review_note": "review_note", "label": "label",
-}
-SEMANTIC_CATEGORY_MAP = {
-    "site_land_area": "site_fact", "site_boundary": "site_fact",
-    "building_footprint": "site_fact", "gross_floor_area": "area",
-    "floor_area": "area", "use_area": "area", "parking_area": "area",
-    "deduction_opening": "deduction", "void": "deduction",
-    "legal_open_space": "site_fact", "setback_measure_line": "dimension",
-    "dimension_line": "dimension", "reference_line": "reference",
-    "road_line": "reference", "frontage_line": "reference",
-    "scale_line": "reference", "north_arrow": "orientation",
-    "review_note": "annotation", "label": "annotation",
-}
-SEMANTIC_REPORT_TARGET_MAP = {
-    "site_land_area": "Site Facts", "site_boundary": "Site Facts",
-    "building_footprint": "Site Facts", "gross_floor_area": "Building Area Summary",
-    "floor_area": "Building Area Summary", "use_area": "Use Category Summary",
-    "parking_area": "Parking Summary", "deduction_opening": "Deduction Summary",
-    "void": "Deduction Summary", "legal_open_space": "Open Space Summary",
-    "setback_measure_line": "Distance Facts", "dimension_line": "Distance Facts",
-    "reference_line": "Audit Log", "road_line": "Site Facts",
-    "frontage_line": "Site Facts", "scale_line": "Audit Log",
-    "north_arrow": "Site Facts", "review_note": "Audit Log", "label": "Audit Log",
-}
-SEMANTIC_LAW_BASIS_MAP = {
-    "gross_floor_area": "พื้นที่อาคาร", "floor_area": "พื้นที่ใช้สอย",
-    "legal_open_space": "ที่ว่าง", "site_land_area": "ที่ดิน",
-}
-SEMANTIC_COUNTING_RULE_MAP = {
-    "site_land_area": "included", "site_boundary": "reference",
-    "building_footprint": "reference", "gross_floor_area": "included",
-    "floor_area": "included", "use_area": "classified", "parking_area": "classified",
-    "deduction_opening": "deducted", "void": "deducted",
-    "legal_open_space": "included", "setback_measure_line": "reference",
-    "dimension_line": "reference", "reference_line": "reference",
-    "road_line": "reference", "frontage_line": "reference",
-    "scale_line": "reference", "north_arrow": "reference",
-    "review_note": "reference", "label": "reference",
-}
-
-def _derive_measurement_meta(tag: str) -> dict:
-    return {
-        "measurementProfile": SEMANTIC_PROFILE_MAP.get(tag, "review_note"),
-        "objectCategory": SEMANTIC_CATEGORY_MAP.get(tag, "annotation"),
-        "reportTarget": SEMANTIC_REPORT_TARGET_MAP.get(tag, "Audit Log"),
-        "lawBasis": SEMANTIC_LAW_BASIS_MAP.get(tag),
-        "countingRule": SEMANTIC_COUNTING_RULE_MAP.get(tag, "reference"),
-    }
-
-def _get_meta(obj: dict, semantic_tag: str) -> dict:
-    derived = _derive_measurement_meta(semantic_tag)
-    return {
-        "measurementProfile": obj.get("measurementProfile") or derived["measurementProfile"],
-        "objectCategory": obj.get("objectCategory") or derived["objectCategory"],
-        "reportTarget": obj.get("reportTarget") or derived["reportTarget"],
-        "lawBasis": obj.get("lawBasis") if "lawBasis" in obj else derived["lawBasis"],
-        "countingRule": obj.get("countingRule") or derived["countingRule"],
-    }
 
 def _scale_state_py(sc: dict) -> str:
     if not sc: return "missing"
@@ -1410,16 +1286,6 @@ async def export_xlsx(body: dict):
     safe = pdf_name.replace("/", "_").replace("\\", "_").replace(".pdf", "")
     return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{safe}_report.xlsx"'})
-
-
-def _m2_to_rwu(m2):
-    if m2 <= 0:
-        return (0, 0, 0)
-    rai = int(m2 // 1600)
-    rem = m2 % 1600
-    ngan = int(rem // 400)
-    sqwa = round((rem % 400) / 4, 2)
-    return (rai, ngan, sqwa)
 
 
 # Load UI from external file (hot-reload on change)

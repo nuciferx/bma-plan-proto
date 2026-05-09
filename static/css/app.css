@@ -346,3 +346,4 @@ canvas{display:block}
 .isp-wf-row.current{color:#fff;font-weight:600}.isp-wf-row.current .isp-wf-dot{background:var(--blue);box-shadow:0 0 4px rgba(10,132,255,.6)}
 .isp-wf-row.warn{color:#ffd28a}.isp-wf-row.warn .isp-wf-dot{background:var(--orange)}
 .isp-next-action{font-size:11px;color:var(--cyan);padding:5px 0 2px;line-height:1.35}
+.rp-active-lyr{font-size:9px;font-weight:800;color:var(--blue);background:rgba(10,132,255,.14);border:1px solid rgba(10,132,255,.3);border-radius:4px;padding:1px 4px;margin-left:4px;letter-spacing:.3px;vertical-align:middle}

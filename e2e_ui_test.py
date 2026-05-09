@@ -358,7 +358,18 @@ def _test_main_measurement_ui_cleanup(page):
                     !!document.querySelector("#rp-object-tree-section") &&
                     rightPanelText.includes("Legacy / Compatibility"),
                 rightPanelLayerCountsVisible: document.querySelectorAll("#rp-content .rp-layer-count").length >= 5,
-                rightPanelLayerControlsVisible: document.querySelectorAll("#rp-content .rp-layer-row .rp-icon-btn").length >= 9
+                rightPanelLayerControlsVisible: document.querySelectorAll("#rp-content .rp-layer-row .rp-icon-btn").length >= 9,
+                leftPanelTabsOk: (() => {
+                    setSidebarMode("objects");
+                    const objVisible = document.getElementById("lp-objects-content")?.style.display !== "none";
+                    const sheetsHidden = document.getElementById("sidebar-content")?.style.display === "none";
+                    setSidebarMode("properties");
+                    const propsVisible = document.getElementById("lp-properties-content")?.style.display !== "none";
+                    const objHidden = document.getElementById("lp-objects-content")?.style.display === "none";
+                    setSidebarMode("sheets");
+                    const sheetsRestored = document.getElementById("sidebar-content")?.style.display !== "none";
+                    return !!(objVisible && sheetsHidden && propsVisible && objHidden && sheetsRestored);
+                })()
             };
         }"""
     )
@@ -400,6 +411,8 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"right panel is not clearly Layers-first with compatibility sections: {result}")
     if not result["rightPanelLayerCountsVisible"] or not result["rightPanelLayerControlsVisible"]:
         raise AssertionError(f"right panel layer counts or controls missing: {result}")
+    if not result["leftPanelTabsOk"]:
+        raise AssertionError(f"left panel tabs do not switch content correctly: {result}")
     for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")

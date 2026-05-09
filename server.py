@@ -720,6 +720,74 @@ TAG_LABELS = {
 
 AREA_SEMANTIC_TAGS = {"gross_floor_area", "floor_area", "use_area"}
 
+SEMANTIC_PROFILE_MAP = {
+    "site_land_area": "site_land_area", "site_boundary": "site_boundary",
+    "building_footprint": "building_footprint", "gross_floor_area": "legal_building_area",
+    "floor_area": "use_area", "use_area": "use_area", "parking_area": "parking_area",
+    "deduction_opening": "deduction_area", "void": "deduction_area",
+    "legal_open_space": "legal_open_space", "setback_measure_line": "setback_measure_line",
+    "dimension_line": "dimension_line", "reference_line": "reference_line",
+    "road_line": "reference_line", "frontage_line": "reference_line",
+    "scale_line": "scale_line", "north_arrow": "north_arrow",
+    "review_note": "review_note", "label": "label",
+}
+SEMANTIC_CATEGORY_MAP = {
+    "site_land_area": "site_fact", "site_boundary": "site_fact",
+    "building_footprint": "site_fact", "gross_floor_area": "area",
+    "floor_area": "area", "use_area": "area", "parking_area": "area",
+    "deduction_opening": "deduction", "void": "deduction",
+    "legal_open_space": "site_fact", "setback_measure_line": "dimension",
+    "dimension_line": "dimension", "reference_line": "reference",
+    "road_line": "reference", "frontage_line": "reference",
+    "scale_line": "reference", "north_arrow": "orientation",
+    "review_note": "annotation", "label": "annotation",
+}
+SEMANTIC_REPORT_TARGET_MAP = {
+    "site_land_area": "Site Facts", "site_boundary": "Site Facts",
+    "building_footprint": "Site Facts", "gross_floor_area": "Building Area Summary",
+    "floor_area": "Building Area Summary", "use_area": "Use Category Summary",
+    "parking_area": "Parking Summary", "deduction_opening": "Deduction Summary",
+    "void": "Deduction Summary", "legal_open_space": "Open Space Summary",
+    "setback_measure_line": "Distance Facts", "dimension_line": "Distance Facts",
+    "reference_line": "Audit Log", "road_line": "Site Facts",
+    "frontage_line": "Site Facts", "scale_line": "Audit Log",
+    "north_arrow": "Site Facts", "review_note": "Audit Log", "label": "Audit Log",
+}
+SEMANTIC_LAW_BASIS_MAP = {
+    "gross_floor_area": "พื้นที่อาคาร", "floor_area": "พื้นที่ใช้สอย",
+    "legal_open_space": "ที่ว่าง", "site_land_area": "ที่ดิน",
+}
+SEMANTIC_COUNTING_RULE_MAP = {
+    "site_land_area": "included", "site_boundary": "reference",
+    "building_footprint": "reference", "gross_floor_area": "included",
+    "floor_area": "included", "use_area": "classified", "parking_area": "classified",
+    "deduction_opening": "deducted", "void": "deducted",
+    "legal_open_space": "included", "setback_measure_line": "reference",
+    "dimension_line": "reference", "reference_line": "reference",
+    "road_line": "reference", "frontage_line": "reference",
+    "scale_line": "reference", "north_arrow": "reference",
+    "review_note": "reference", "label": "reference",
+}
+
+def _derive_measurement_meta(tag: str) -> dict:
+    return {
+        "measurementProfile": SEMANTIC_PROFILE_MAP.get(tag, "review_note"),
+        "objectCategory": SEMANTIC_CATEGORY_MAP.get(tag, "annotation"),
+        "reportTarget": SEMANTIC_REPORT_TARGET_MAP.get(tag, "Audit Log"),
+        "lawBasis": SEMANTIC_LAW_BASIS_MAP.get(tag),
+        "countingRule": SEMANTIC_COUNTING_RULE_MAP.get(tag, "reference"),
+    }
+
+def _get_meta(obj: dict, semantic_tag: str) -> dict:
+    derived = _derive_measurement_meta(semantic_tag)
+    return {
+        "measurementProfile": obj.get("measurementProfile") or derived["measurementProfile"],
+        "objectCategory": obj.get("objectCategory") or derived["objectCategory"],
+        "reportTarget": obj.get("reportTarget") or derived["reportTarget"],
+        "lawBasis": obj.get("lawBasis") if "lawBasis" in obj else derived["lawBasis"],
+        "countingRule": obj.get("countingRule") or derived["countingRule"],
+    }
+
 def _semantic_tag(kind: str, obj: dict | None = None) -> str:
     obj = obj or {}
     if kind == "poly":
@@ -914,10 +982,11 @@ async def export_xlsx(body: dict):
     ws.set_column(0, 0, 18); ws.set_column(1, 1, 12); ws.set_column(2, 2, 28)
     ws.set_column(3, 3, 14); ws.set_column(4, 4, 14); ws.set_column(5, 5, 14)
     ws.set_column(6, 6, 14); ws.set_column(7, 7, 40); ws.set_column(8, 9, 18)
+    ws.set_column(10, 14, 20)
     row = 0
-    ws.merge_range(row, 0, row, 9, f"สรุปพื้นที่ — {pdf_name}", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    ws.merge_range(row, 0, row, 14, f"สรุปพื้นที่ — {pdf_name}", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
     row += 2
-    headers = ["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "พื้นที่ (ตร.ม.)", "ไร่", "งาน", "ตารางวา", "หมายเหตุ", "semanticTag", "useCategory"]
+    headers = ["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "พื้นที่ (ตร.ม.)", "ไร่", "งาน", "ตารางวา", "หมายเหตุ", "semanticTag", "useCategory", "measurementProfile", "objectCategory", "reportTarget", "lawBasis", "countingRule"]
     for c, h in enumerate(headers): ws.write(row, c, h, fmt_hdr)
     row += 1
     grand_total = 0.0; grand_openings = 0.0
@@ -929,7 +998,7 @@ async def export_xlsx(body: dict):
         pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
         polys = pg_data.get("polys", []); openings = pg_data.get("openings", [])
         if not polys and not openings: continue
-        ws.merge_range(row, 0, row, 9, pg_name, fmt_sub); row += 1
+        ws.merge_range(row, 0, row, 14, pg_name, fmt_sub); row += 1
         pg_total = 0.0; pg_openings = 0.0
         for poly in polys:
             if not poly.get("closed"): continue
@@ -951,7 +1020,14 @@ async def export_xlsx(body: dict):
             else:
                 ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
             ws.write(row, 7, note, fmt_note)
-            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, use_category or "", fmt_cell); row += 1
+            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, use_category or "", fmt_cell)
+            poly_meta = _get_meta(poly, semantic_tag)
+            ws.write(row, 10, poly_meta["measurementProfile"], fmt_cell)
+            ws.write(row, 11, poly_meta["objectCategory"], fmt_cell)
+            ws.write(row, 12, poly_meta["reportTarget"], fmt_cell)
+            ws.write(row, 13, poly_meta["lawBasis"] or "", fmt_cell)
+            ws.write(row, 14, poly_meta["countingRule"], fmt_cell)
+            row += 1
             if area > 0: pg_total += area
         for op in openings:
             area = op.get("area", 0) or 0; name = op.get("name", "ช่องว่าง")
@@ -963,29 +1039,38 @@ async def export_xlsx(body: dict):
             ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
             semantic_tag = op.get("semanticTag") or _semantic_tag("opening", op)
             ws.write(row, 7, op.get("note", "หักช่องว่าง"), fmt_note)
-            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, "", fmt_cell); row += 1
+            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, "", fmt_cell)
+            op_meta = _get_meta(op, semantic_tag)
+            ws.write(row, 10, op_meta["measurementProfile"], fmt_cell)
+            ws.write(row, 11, op_meta["objectCategory"], fmt_cell)
+            ws.write(row, 12, op_meta["reportTarget"], fmt_cell)
+            ws.write(row, 13, op_meta["lawBasis"] or "", fmt_cell)
+            ws.write(row, 14, op_meta["countingRule"], fmt_cell)
+            row += 1
             if area > 0: pg_openings += area
         net = pg_total - pg_openings
         ws.write(row, 0, "", fmt_cell); ws.write(row, 1, "", fmt_tag)
         ws.write(row, 2, "รวมสุทธิ", fmt_cell); ws.write(row, 3, round(net, 2), fmt_net)
         ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
         ws.write(row, 7, f"รวม {pg_total:.2f} − ช่องว่าง {pg_openings:.2f}", fmt_note)
-        ws.write(row, 8, "", fmt_cell); ws.write(row, 9, "", fmt_cell); row += 2
+        for c in range(8, 15): ws.write(row, c, "", fmt_cell)
+        row += 2
         grand_total += pg_total; grand_openings += pg_openings
     ws.merge_range(row, 0, row, 2, "รวมทั้งโปรเจกต์", fmt_hdr)
     ws.write(row, 3, round(grand_total, 2), fmt_total)
     ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
     ws.write(row, 7, f"รวม {grand_total:.2f} − ช่องว่าง {grand_openings:.2f} = สุทธิ {grand_total - grand_openings:.2f} ตร.ม.", fmt_note)
-    ws.write(row, 8, "", fmt_cell); ws.write(row, 9, "", fmt_cell)
+    for c in range(8, 15): ws.write(row, c, "", fmt_cell)
 
     # ── Sheet 2: ความยาวเส้น Polygon (with Tag) ──
     ws2 = wb.add_worksheet("ความยาวเส้น Polygon")
     ws2.set_column(0, 0, 18); ws2.set_column(1, 1, 12); ws2.set_column(2, 2, 28)
     ws2.set_column(3, 3, 14); ws2.set_column(4, 4, 14); ws2.set_column(5, 5, 40); ws2.set_column(6, 7, 18)
+    ws2.set_column(8, 12, 20)
     r2 = 0
-    ws2.merge_range(r2, 0, r2, 7, "ความยาวเส้นทุกด้านของ Polygon", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    ws2.merge_range(r2, 0, r2, 12, "ความยาวเส้นทุกด้านของ Polygon", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
     r2 += 2
-    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "ด้านที่", "ความยาว (ม.)", "หมายเหตุ", "semanticTag", "useCategory"]):
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "ด้านที่", "ความยาว (ม.)", "หมายเหตุ", "semanticTag", "useCategory", "measurementProfile", "objectCategory", "reportTarget", "lawBasis", "countingRule"]):
         ws2.write(r2, c, h, fmt_hdr)
     r2 += 1
     for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
@@ -1008,6 +1093,12 @@ async def export_xlsx(body: dict):
                 ws2.write(r2, 2, name, fmt_cell); ws2.write(r2, 3, f"ด้าน {i+1}", fmt_cell)
                 ws2.write(r2, 4, round(dist_m, 2), fmt_num); ws2.write(r2, 5, f"{dist_pt:.1f} pt", fmt_note)
                 ws2.write(r2, 6, semantic_tag, fmt_cell); ws2.write(r2, 7, use_category or "", fmt_cell)
+                poly2_meta = _get_meta(poly, semantic_tag)
+                ws2.write(r2, 8, poly2_meta["measurementProfile"], fmt_cell)
+                ws2.write(r2, 9, poly2_meta["objectCategory"], fmt_cell)
+                ws2.write(r2, 10, poly2_meta["reportTarget"], fmt_cell)
+                ws2.write(r2, 11, poly2_meta["lawBasis"] or "", fmt_cell)
+                ws2.write(r2, 12, poly2_meta["countingRule"], fmt_cell)
                 r2 += 1
 
     # ── Sheet 3: สรุปตามชั้น ──
@@ -1098,10 +1189,11 @@ async def export_xlsx(body: dict):
     ws5 = wb.add_worksheet("ที่จอดรถ")
     ws5.set_column(0, 0, 18); ws5.set_column(1, 1, 12); ws5.set_column(2, 2, 18)
     ws5.set_column(3, 3, 12); ws5.set_column(4, 4, 36); ws5.set_column(5, 6, 18)
+    ws5.set_column(7, 11, 20)
     r5 = 0
-    ws5.merge_range(r5, 0, r5, 6, "สรุปที่จอดรถจากจุดที่ผู้ใช้ mark", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    ws5.merge_range(r5, 0, r5, 11, "สรุปที่จอดรถจากจุดที่ผู้ใช้ mark", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
     r5 += 2
-    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ประเภทที่จอด", "จำนวน (คัน)", "หมายเหตุ", "semanticTag", "useCategory"]):
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ประเภทที่จอด", "จำนวน (คัน)", "หมายเหตุ", "semanticTag", "useCategory", "measurementProfile", "objectCategory", "reportTarget", "lawBasis", "countingRule"]):
         ws5.write(r5, c, h, fmt_hdr)
     r5 += 1
     parking_totals = {}
@@ -1120,22 +1212,31 @@ async def export_xlsx(body: dict):
             ws5.write(r5, 0, pg_name, fmt_cell); ws5.write(r5, 1, tag_label, fmt_tag)
             ws5.write(r5, 2, ptype, fmt_cell); ws5.write(r5, 3, count, fmt_cell)
             ws5.write(r5, 4, "ข้อมูลนับจาก marker ยังไม่เทียบเกณฑ์กฎหมาย", fmt_note)
-            ws5.write(r5, 5, by_semantic.get(ptype, "review_note"), fmt_cell); ws5.write(r5, 6, "", fmt_cell)
+            park_sem = by_semantic.get(ptype, "review_note")
+            ws5.write(r5, 5, park_sem, fmt_cell); ws5.write(r5, 6, "", fmt_cell)
+            park_meta = _derive_measurement_meta(park_sem)
+            ws5.write(r5, 7, park_meta["measurementProfile"], fmt_cell)
+            ws5.write(r5, 8, park_meta["objectCategory"], fmt_cell)
+            ws5.write(r5, 9, park_meta["reportTarget"], fmt_cell)
+            ws5.write(r5, 10, park_meta["lawBasis"] or "", fmt_cell)
+            ws5.write(r5, 11, park_meta["countingRule"], fmt_cell)
             r5 += 1
     if parking_totals:
         ws5.write(r5, 0, "รวม", fmt_cell); ws5.write(r5, 1, "", fmt_tag)
         ws5.write(r5, 2, ", ".join(f"{k}: {v}" for k, v in sorted(parking_totals.items())), fmt_cell)
         ws5.write(r5, 3, sum(parking_totals.values()), fmt_total)
-        ws5.write(r5, 4, "", fmt_note); ws5.write(r5, 5, "", fmt_cell); ws5.write(r5, 6, "", fmt_cell)
+        ws5.write(r5, 4, "", fmt_note)
+        for c in range(5, 12): ws5.write(r5, c, "", fmt_cell)
 
     # ── Sheet 6: ระยะถึงเส้นอ้างอิง ──
     ws6 = wb.add_worksheet("ระยะอ้างอิง")
     ws6.set_column(0, 0, 18); ws6.set_column(1, 1, 12); ws6.set_column(2, 2, 24)
     ws6.set_column(3, 3, 28); ws6.set_column(4, 4, 14); ws6.set_column(5, 5, 28); ws6.set_column(6, 7, 18)
+    ws6.set_column(8, 12, 20)
     r6 = 0
-    ws6.merge_range(r6, 0, r6, 7, "รายงานระยะ object ถึงเส้นอ้างอิง", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    ws6.merge_range(r6, 0, r6, 12, "รายงานระยะ object ถึงเส้นอ้างอิง", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
     r6 += 2
-    for c, h in enumerate(["หน้า / ชั้น", "Tag", "เส้นอ้างอิง", "Object", "ระยะ", "หมายเหตุ", "semanticTag", "useCategory"]):
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "เส้นอ้างอิง", "Object", "ระยะ", "หมายเหตุ", "semanticTag", "useCategory", "measurementProfile", "objectCategory", "reportTarget", "lawBasis", "countingRule"]):
         ws6.write(r6, c, h, fmt_hdr)
     r6 += 1
     for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
@@ -1179,6 +1280,12 @@ async def export_xlsx(body: dict):
                 ws6.write(r6, 5, f"{best.get('point_role', '')} · {unit}", fmt_note)
                 semantic_tag = obj.get("semanticTag") or _semantic_tag(kind if kind != "poly" else "poly", obj)
                 ws6.write(r6, 6, semantic_tag, fmt_cell); ws6.write(r6, 7, _use_category(obj, semantic_tag) or "", fmt_cell)
+                ref_meta = _get_meta(obj, semantic_tag)
+                ws6.write(r6, 8, ref_meta["measurementProfile"], fmt_cell)
+                ws6.write(r6, 9, ref_meta["objectCategory"], fmt_cell)
+                ws6.write(r6, 10, ref_meta["reportTarget"], fmt_cell)
+                ws6.write(r6, 11, ref_meta["lawBasis"] or "", fmt_cell)
+                ws6.write(r6, 12, ref_meta["countingRule"], fmt_cell)
                 r6 += 1
 
     wb.close(); buf.seek(0)

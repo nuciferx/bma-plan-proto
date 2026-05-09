@@ -1257,6 +1257,9 @@ def _test_opening_and_xlsx_export(page, download_dir: Path):
     for text in [VECTOR_POLY_NAME, VECTOR_OPENING_NAME, "รวมสุทธิ", "BMA-Plan Phase 1 Export", "UI pageStore", "REQ-XLSX-E2E", "site-e2e", "N / ทิศเหนือ", "front_road", "ถนนหน้าโครงการ"]:
         if text not in shared_xml:
             raise AssertionError(f"XLSX missing expected text {text!r}")
+    for col_header in ["measurementProfile", "objectCategory", "reportTarget", "lawBasis", "countingRule"]:
+        if col_header not in shared_xml:
+            raise AssertionError(f"XLSX missing metadata column header {col_header!r}")
     return {"summary": summary, "xlsx_file": xlsx_target.name}
 
 

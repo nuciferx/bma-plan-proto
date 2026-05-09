@@ -187,11 +187,13 @@ def _test_main_measurement_ui_cleanup(page):
             const topbar = document.querySelector("#topbar");
             const workspace = document.querySelector("#workspace");
             const notice = document.querySelector("#scale-notice");
+            const canvasTopBar = document.querySelector("#canvas-top-bar");
             const cc = document.querySelector("#cc");
             const toolbarRect = toolbar.getBoundingClientRect();
             const topbarRect = topbar.getBoundingClientRect();
             const workspaceRect = workspace.getBoundingClientRect();
             const noticeRect = notice.getBoundingClientRect();
+            const canvasTopRect = canvasTopBar.getBoundingClientRect();
             const ccStyle = getComputedStyle(cc);
             const exportRect = document.querySelector("#btn-export-report").getBoundingClientRect();
             const scaleRect = document.querySelector("#scale-badge").getBoundingClientRect();
@@ -392,7 +394,17 @@ def _test_main_measurement_ui_cleanup(page):
                     toggleInspectionPanel();
                     const afterRestore = body.classList.contains("collapsed");
                     return (afterToggle !== wasBefore) && (afterRestore === wasBefore);
-                })()
+                })(),
+                canvasTopBarVisible: isVisible(canvasTopBar),
+                canvasTopBarInsideWorkspace: !!document.querySelector("#workspace #canvas-top-bar"),
+                canvasTopBarNotBlockingCanvas: getComputedStyle(canvasTopBar).pointerEvents === "none",
+                canvasTopBarContentOk: (() => {
+                    const txt = canvasTopBar?.textContent || "";
+                    return txt.includes("Page") && txt.includes("Scale") && txt.includes("Tool:") && txt.includes("Layer:");
+                })(),
+                canvasTopBarFitsWorkspace: canvasTopRect.left >= workspaceRect.left &&
+                    canvasTopRect.right <= workspaceRect.right &&
+                    canvasTopRect.top >= workspaceRect.top
             };
         }"""
     )
@@ -464,6 +476,12 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"Inspection panel context section title not found: {result}")
     if not result.get("inspectionPanelToggleWorks"):
         raise AssertionError(f"Inspection panel collapse/expand toggle does not work: {result}")
+    if not result.get("canvasTopBarVisible") or not result.get("canvasTopBarInsideWorkspace"):
+        raise AssertionError(f"canvas top info bar is not visible inside #workspace: {result}")
+    if not result.get("canvasTopBarNotBlockingCanvas"):
+        raise AssertionError(f"canvas top info bar must not block canvas pointer events: {result}")
+    if not result.get("canvasTopBarContentOk") or not result.get("canvasTopBarFitsWorkspace"):
+        raise AssertionError(f"canvas top info bar content/layout failed: {result}")
     for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")

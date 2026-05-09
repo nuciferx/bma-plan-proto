@@ -95,6 +95,7 @@ button,input,select{font-family:inherit}button{cursor:pointer}
 .rp-empty{font-size:12px;color:var(--text3);line-height:1.45}
 .rp-prop-grid{display:grid;grid-template-columns:88px 1fr;gap:6px 8px;font-size:12px;align-items:center}
 .rp-prop-grid label{color:var(--text2);font-size:11px}
+.rp-prop-grid .rp-meta-value{font-size:11px;color:#6e7a8a;font-style:italic}
 .rp-prop-grid input,.rp-prop-grid select{min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:12px}
 .rp-metric{padding:6px 8px;background:var(--surface2);border-radius:6px;font-size:12px;display:flex;justify-content:space-between;margin-top:4px}
 .rp-metric span:first-child{color:var(--text2)}
@@ -848,6 +849,11 @@ const AREA_LABELS={room:"ห้อง/อาคาร",building:"แนวอา
 const SEMANTIC_TAG_LABELS={site_boundary:"site_boundary",parcel_side:"parcel_side",north_arrow:"north_arrow",road_line:"road_line",frontage_line:"frontage_line",gross_floor_area:"gross_floor_area",floor_area:"floor_area",use_area:"use_area",deduction_opening:"deduction_opening",void:"void",scale_line:"scale_line",reference_line:"reference_line",dimension_line:"dimension_line",label:"label",review_note:"review_note"};
 const USE_CATEGORY_LABELS={residential:"residential",commercial:"commercial",office:"office",service:"service",parking:"parking",mechanical:"mechanical",storage:"storage",circulation:"circulation",common:"common",other:"other"};
 const AREA_SEMANTIC_TAGS=new Set(["gross_floor_area","floor_area","use_area"]);
+const SEMANTIC_PROFILE_MAP={site_land_area:"site_land_area",site_boundary:"site_boundary",building_footprint:"building_footprint",gross_floor_area:"legal_building_area",floor_area:"use_area",use_area:"use_area",parking_area:"parking_area",deduction_opening:"deduction_area",void:"deduction_area",legal_open_space:"legal_open_space",setback_measure_line:"setback_measure_line",dimension_line:"dimension_line",reference_line:"reference_line",road_line:"reference_line",frontage_line:"reference_line",scale_line:"scale_line",north_arrow:"north_arrow",review_note:"review_note",label:"label"};
+const SEMANTIC_CATEGORY_MAP={site_land_area:"site_fact",site_boundary:"site_fact",building_footprint:"site_fact",gross_floor_area:"area",floor_area:"area",use_area:"area",parking_area:"area",deduction_opening:"deduction",void:"deduction",legal_open_space:"site_fact",setback_measure_line:"dimension",dimension_line:"dimension",reference_line:"reference",road_line:"reference",frontage_line:"reference",scale_line:"reference",north_arrow:"orientation",review_note:"annotation",label:"annotation"};
+const SEMANTIC_REPORT_TARGET_MAP={site_land_area:"Site Facts",site_boundary:"Site Facts",building_footprint:"Site Facts",gross_floor_area:"Building Area Summary",floor_area:"Building Area Summary",use_area:"Use Category Summary",parking_area:"Parking Summary",deduction_opening:"Deduction Summary",void:"Deduction Summary",legal_open_space:"Open Space Summary",setback_measure_line:"Distance Facts",dimension_line:"Distance Facts",reference_line:"Audit Log",road_line:"Site Facts",frontage_line:"Site Facts",scale_line:"Audit Log",north_arrow:"Site Facts",review_note:"Audit Log",label:"Audit Log"};
+const SEMANTIC_LAW_BASIS_MAP={gross_floor_area:"พื้นที่อาคาร",floor_area:"พื้นที่ใช้สอย",legal_open_space:"ที่ว่าง",site_land_area:"ที่ดิน"};
+const SEMANTIC_COUNTING_RULE_MAP={site_land_area:"included",site_boundary:"reference",building_footprint:"reference",gross_floor_area:"included",floor_area:"included",use_area:"classified",parking_area:"classified",deduction_opening:"deducted",void:"deducted",legal_open_space:"included",setback_measure_line:"reference",dimension_line:"reference",reference_line:"reference",road_line:"reference",frontage_line:"reference",scale_line:"reference",north_arrow:"reference",review_note:"reference",label:"reference"};
 const LAND_EDGE_TYPES={front_road:"ด้านหน้า/ถนน",side_left:"ด้านซ้าย",side_right:"ด้านขวา",back:"ด้านหลัง",neighbor:"ที่ดินข้างเคียง",canal:"คลอง/แหล่งน้ำ",ignore:"ไม่ใช้รายงาน"};
 const LAND_EDGE_COLORS={front_road:"#0a84ff",side_left:"#bf5af2",side_right:"#5ac8fa",back:"#ff9500",neighbor:"#30d158",canal:"#64d2ff",ignore:"#8e8e93"};
 const LAND_EDGE_DEFAULT_LABELS=["ด้าน 1","ด้าน 2","ด้าน 3","ด้าน 4"];
@@ -1020,11 +1026,18 @@ function defaultSemanticTag(type,obj={}){
   console.warn("Unknown object type for semanticTag",type,obj);
   return"review_note";
 }
+function deriveMeasurementMeta(tag){return{measurementProfile:SEMANTIC_PROFILE_MAP[tag]||"review_note",objectCategory:SEMANTIC_CATEGORY_MAP[tag]||"annotation",reportTarget:SEMANTIC_REPORT_TARGET_MAP[tag]||"Audit Log",lawBasis:SEMANTIC_LAW_BASIS_MAP[tag]||null,countingRule:SEMANTIC_COUNTING_RULE_MAP[tag]||"reference"};}
 function normalizeSemanticFields(obj,type){
   if(!obj)return obj;
   if(!obj.semanticTag)obj.semanticTag=defaultSemanticTag(type,obj);
   if(!isAreaSemanticTag(obj.semanticTag))obj.useCategory=null;
   else if(!Object.prototype.hasOwnProperty.call(obj,"useCategory"))obj.useCategory=null;
+  const meta=deriveMeasurementMeta(obj.semanticTag);
+  if(!obj.measurementProfile)obj.measurementProfile=meta.measurementProfile;
+  if(!obj.objectCategory)obj.objectCategory=meta.objectCategory;
+  if(!obj.reportTarget)obj.reportTarget=meta.reportTarget;
+  if(!Object.prototype.hasOwnProperty.call(obj,"lawBasis"))obj.lawBasis=meta.lawBasis;
+  if(!obj.countingRule)obj.countingRule=meta.countingRule;
   return obj;
 }
 function semanticOptionsFor(sel,obj){
@@ -1087,7 +1100,7 @@ function buildRightPanel(){normalizeCurrentObjects();const content=document.getE
     const semOpts=semanticOptionsFor(sel,obj).map(k=>`<option value="${k}" ${obj.semanticTag===k?"selected":""}>${escHtml(SEMANTIC_TAG_LABELS[k]||k)}</option>`).join("");
     const useEnabled=isAreaSemanticTag(obj.semanticTag);
     const useOpts=`<option value="" ${obj.useCategory==null?"selected":""}>—</option>`+Object.entries(USE_CATEGORY_LABELS).map(([k,l])=>`<option value="${k}" ${obj.useCategory===k?"selected":""}>${escHtml(l)}</option>`).join("");
-    html+=`<label>Color</label><input type="color" value="${escHtml(obj.color||curColor)}" onchange="rpSetColor(this.value)"><label>Opacity</label><input type="range" min="10" max="100" value="${Math.round((obj.opacity??curOpacity)*100)}" onchange="rpSetOpacity(this.value)"><label>Label</label><select onchange="rpSetLabelMode(this.value)"><option value="auto" ${(obj.label?.mode||"auto")==="auto"?"selected":""}>auto</option><option value="hidden" ${obj.label?.mode==="hidden"?"selected":""}>hidden</option></select><label>Semantic Tag</label><select id="rp-semantic-tag" onchange="rpSetSemanticTag(this.value)">${semOpts}</select><label>Use Category</label><select id="rp-use-category" onchange="rpSetUseCategory(this.value)" ${useEnabled?"":"disabled"}>${useOpts}</select></div>`;
+    html+=`<label>Color</label><input type="color" value="${escHtml(obj.color||curColor)}" onchange="rpSetColor(this.value)"><label>Opacity</label><input type="range" min="10" max="100" value="${Math.round((obj.opacity??curOpacity)*100)}" onchange="rpSetOpacity(this.value)"><label>Label</label><select onchange="rpSetLabelMode(this.value)"><option value="auto" ${(obj.label?.mode||"auto")==="auto"?"selected":""}>auto</option><option value="hidden" ${obj.label?.mode==="hidden"?"selected":""}>hidden</option></select><label>Semantic Tag</label><select id="rp-semantic-tag" onchange="rpSetSemanticTag(this.value)">${semOpts}</select><label>Use Category</label><select id="rp-use-category" onchange="rpSetUseCategory(this.value)" ${useEnabled?"":"disabled"}>${useOpts}</select><label>Profile</label><div class="rp-meta-value">${escHtml(obj.measurementProfile||"—")}</div><label>Category</label><div class="rp-meta-value">${escHtml(obj.objectCategory||"—")}</div><label>Report</label><div class="rp-meta-value">${escHtml(obj.reportTarget||"—")}</div>${obj.lawBasis?`<label>Law Basis</label><div class="rp-meta-value">${escHtml(obj.lawBasis)}</div>`:""}<label>Count Rule</label><div class="rp-meta-value">${escHtml(obj.countingRule||"—")}</div></div>`;
     if(sel.type==="poly"){const gross=polyMetrics(obj,curPage).area,open=selectedOpeningAreaFor(obj),net=gross!=null?gross-open:null;html+=`<div class="rp-metric"><span>Gross</span><b>${gross!=null?gross.toFixed(2)+" ตร.ม.":"—"}</b></div><div class="rp-metric"><span>Opening</span><b>${open.toFixed(2)} ตร.ม.</b></div><div class="rp-metric"><span>Net</span><b>${net!=null?net.toFixed(2)+" ตร.ม.":"—"}</b></div>`;if(obj.areaType==="land")html+=buildParcelSideEditorHtml(obj);}
     else html+=`<div class="rp-metric"><span>Value</span><b>${escHtml(objMetricText(sel,obj))}</b></div>`;
     html+=`</div>`;
@@ -1101,7 +1114,7 @@ function focusObject(sel,obj){const b=objectCanvasBounds(sel,obj);if(!b)return;c
 function selectObjectFromTree(type,idx,focus=false){setMode("sel");selItem={type,idx};syncColorBar(selItem);const obj=selectedObj(selItem);if(focus)focusObject(selItem,obj);redraw();buildRightPanel();}
 function rpSetName(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.name=v.trim();updatePageSummary(curPage);redraw();buildRightPanel();}
 function rpSetAreaType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="poly")return;pushUndo();obj.areaType=v;updatePageSummary(curPage);redraw();buildRightPanel();}
-function rpSetSemanticTag(v){const obj=selectedObj(selItem);if(!obj||!v)return;pushUndo();obj.semanticTag=v;if(!isAreaSemanticTag(v))obj.useCategory=null;else if(!Object.prototype.hasOwnProperty.call(obj,"useCategory"))obj.useCategory=null;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetSemanticTag(v){const obj=selectedObj(selItem);if(!obj||!v)return;pushUndo();obj.semanticTag=v;if(!isAreaSemanticTag(v))obj.useCategory=null;else if(!Object.prototype.hasOwnProperty.call(obj,"useCategory"))obj.useCategory=null;const meta=deriveMeasurementMeta(v);obj.measurementProfile=meta.measurementProfile;obj.objectCategory=meta.objectCategory;obj.reportTarget=meta.reportTarget;obj.lawBasis=meta.lawBasis;obj.countingRule=meta.countingRule;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
 function rpSetUseCategory(v){const obj=selectedObj(selItem);if(!obj||!isAreaSemanticTag(obj.semanticTag))return;pushUndo();obj.useCategory=v||null;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
 function rpSetRefType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="ref")return;pushUndo();obj.refType=v;redraw();buildRightPanel();}
 function rpSetParkingType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="parking")return;pushUndo();obj.parkingType=v;updatePageSummary(curPage);redraw();buildRightPanel();}
@@ -1280,32 +1293,32 @@ function buildRows(){
     const scl=scaleLabel(scale);
     for(const l of(data.lines||[])){
       const metrics=lineMetrics(l,pg);
-      rows.push({...rowBase(pg,l.kind==="path"?TYPE_PATH:TYPE_DISTANCE,l.name||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:l.id,segments:metrics.segments.length,semanticTag:l.semanticTag||defaultSemanticTag("line",l),useCategory:null});
+      const lSem=l.semanticTag||defaultSemanticTag("line",l);rows.push({...rowBase(pg,l.kind==="path"?TYPE_PATH:TYPE_DISTANCE,l.name||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:l.id,segments:metrics.segments.length,semanticTag:lSem,useCategory:null,...deriveMeasurementMeta(lSem)});
     }
     for(const r of(data.refs||[])){
       const metrics=lineMetrics(r,pg);
-      rows.push({...rowBase(pg,TYPE_REF,r.name||REF_LABELS[r.refType]||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:r.id,ref_type:r.refType||"custom",label_mode:r.label?.mode||"auto",semanticTag:r.semanticTag||defaultSemanticTag("ref",r),useCategory:null});
+      const rSem=r.semanticTag||defaultSemanticTag("ref",r);rows.push({...rowBase(pg,TYPE_REF,r.name||REF_LABELS[r.refType]||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:r.id,ref_type:r.refType||"custom",label_mode:r.label?.mode||"auto",semanticTag:rSem,useCategory:null,...deriveMeasurementMeta(rSem)});
     }
     for(const p of(data.parking||[])){
-      rows.push({...rowBase(pg,TYPE_PARKING,PARKING_LABELS[p.parkingType]||p.parkingType||"รถยนต์",p.count||1,"คัน",scale),object_id:p.id,parking_type:p.parkingType||"car",semanticTag:p.semanticTag||defaultSemanticTag("parking",p),useCategory:null});
+      const pkSem=p.semanticTag||defaultSemanticTag("parking",p);rows.push({...rowBase(pg,TYPE_PARKING,PARKING_LABELS[p.parkingType]||p.parkingType||"รถยนต์",p.count||1,"คัน",scale),object_id:p.id,parking_type:p.parkingType||"car",semanticTag:pkSem,useCategory:null,...deriveMeasurementMeta(pkSem)});
     }
     for(const p of(data.polys||[])){
       if(!p.closed)continue;
       const metrics=polyMetrics(p,pg);
       const sem=p.semanticTag||defaultSemanticTag("poly",p);
-      const row={...rowBase(pg,TYPE_AREA,p.name||"",metrics.area!=null?+metrics.area.toFixed(4):null,"ตร.ม.",scale),object_id:p.id,area_type:p.areaType||"room",label_mode:p.label?.mode||"auto",semanticTag:sem,useCategory:isAreaSemanticTag(sem)?(p.useCategory||null):null};
+      const row={...rowBase(pg,TYPE_AREA,p.name||"",metrics.area!=null?+metrics.area.toFixed(4):null,"ตร.ม.",scale),object_id:p.id,area_type:p.areaType||"room",label_mode:p.label?.mode||"auto",semanticTag:sem,useCategory:isAreaSemanticTag(sem)?(p.useCategory||null):null,...deriveMeasurementMeta(sem)};
       row[COL_RNW]=p.areaType==="land"?toRNW(metrics.area):"";
       rows.push(row);
     }
     for(const op of(data.openings||[])){
       if(!op.closed)continue;
       const area=polyMetrics({pts:op.pts,closed:true},pg).area;
-      rows.push({...rowBase(pg,TYPE_OPENING,op.name||"",area!=null?+area.toFixed(4):null,"ตร.ม.",scale),object_id:op.id,parent_id:op.parentId||"",label_mode:op.label?.mode||"auto",semanticTag:op.semanticTag||defaultSemanticTag("opening",op),useCategory:null});
+      const opSem=op.semanticTag||defaultSemanticTag("opening",op);rows.push({...rowBase(pg,TYPE_OPENING,op.name||"",area!=null?+area.toFixed(4):null,"ตร.ม.",scale),object_id:op.id,parent_id:op.parentId||"",label_mode:op.label?.mode||"auto",semanticTag:opSem,useCategory:null,...deriveMeasurementMeta(opSem)});
     }
   }
   for(const r of collectRefDistanceReport()){
     const scale=getScaleForPage(r.pg);
-    rows.push({...rowBase(r.pg,TYPE_REF_DISTANCE,`${r.objectName} -> ${r.refName}`,+(r.dist!=null?r.dist:r.distPt).toFixed(4),r.unit,scale),ref_type:r.refType,object_type:r.objectType,point_role:r.pointRole,semanticTag:"dimension_line",useCategory:null});
+    rows.push({...rowBase(r.pg,TYPE_REF_DISTANCE,`${r.objectName} -> ${r.refName}`,+(r.dist!=null?r.dist:r.distPt).toFixed(4),r.unit,scale),ref_type:r.refType,object_type:r.objectType,point_role:r.pointRole,semanticTag:"dimension_line",useCategory:null,...deriveMeasurementMeta("dimension_line")});
   }
   return rows.sort((a,b)=>a[COL_PAGE]-b[COL_PAGE]);
 }

@@ -839,6 +839,8 @@ def _test_selection_and_area_type_helpers(page):
             rpSetSemanticTag("gross_floor_area");
             rpSetUseCategory("residential");
             const semanticEdited = mPolys[0].semanticTag === "gross_floor_area" && mPolys[0].useCategory === "residential";
+            const metaOk = mPolys[0].measurementProfile === "legal_building_area" && mPolys[0].objectCategory === "area" && mPolys[0].reportTarget === "Building Area Summary" && mPolys[0].countingRule === "included" && mPolys[0].lawBasis === "พื้นที่อาคาร";
+            const metaPanelVisible = !!document.querySelector("#rp-content .rp-meta-value");
             const undoCapturedSemantic = undoStack.length > 0;
             selItem = {type: "opening", idx: 0};
             buildRightPanel();
@@ -847,8 +849,9 @@ def _test_selection_and_area_type_helpers(page):
             rpSetLabelMode("hidden");
             const labelHidden = mPolys[0].label?.mode === "hidden" && !shouldDrawLabelForObject(mPolys[0], false);
             const stripped = JSON.parse(JSON.stringify({polys:mPolys, openings:mOpenings, refs:mRefs, lines:mLines, parking:mParking}));
-            for (const list of Object.values(stripped)) for (const obj of list) { delete obj.semanticTag; delete obj.useCategory; }
+            for (const list of Object.values(stripped)) for (const obj of list) { delete obj.semanticTag; delete obj.useCategory; delete obj.measurementProfile; delete obj.objectCategory; delete obj.reportTarget; delete obj.lawBasis; delete obj.countingRule; }
             ensureStoreObjectIds(stripped);
+            const strippedMetaOk = stripped.polys[0].measurementProfile === "use_area" && stripped.polys[0].objectCategory === "area" && stripped.polys[0].countingRule === "classified";
             const strippedDefaults = {
                 poly: stripped.polys[0].semanticTag,
                 opening: stripped.openings[0].semanticTag,
@@ -893,8 +896,11 @@ def _test_selection_and_area_type_helpers(page):
                 semanticDefaults,
                 semanticControlsVisible,
                 semanticEdited,
+                metaOk,
+                metaPanelVisible,
                 undoCapturedSemantic,
                 openingUseDisabled,
+                strippedMetaOk,
                 strippedDefaults,
                 labelHidden,
                 refHitBefore,
@@ -941,8 +947,14 @@ def _test_selection_and_area_type_helpers(page):
             raise AssertionError(f"semantic defaults failed for {key}: {result}")
     if not result["semanticControlsVisible"] or not result["semanticEdited"] or not result["undoCapturedSemantic"]:
         raise AssertionError(f"semantic properties editing failed: {result}")
+    if not result["metaOk"]:
+        raise AssertionError(f"measurement profile metadata not derived correctly after rpSetSemanticTag: {result}")
+    if not result["metaPanelVisible"]:
+        raise AssertionError(f"measurement metadata read-only labels not visible in properties panel: {result}")
     if not result["openingUseDisabled"]:
         raise AssertionError(f"useCategory should be disabled/null for opening: {result}")
+    if not result["strippedMetaOk"]:
+        raise AssertionError(f"measurement profile metadata not re-normalized after strip: {result}")
     stripped_expected = {
         "poly": "use_area",
         "opening": "deduction_opening",

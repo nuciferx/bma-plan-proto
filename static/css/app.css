@@ -317,6 +317,7 @@ canvas{display:block}
 .widget-body{font-size:11px;color:var(--text2);line-height:1.5}
 .widget-link{margin-top:6px;display:inline-block;font-size:10px;color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-align:left}
 .widget-link:hover{text-decoration:underline}
+.widget-links-row{display:flex;gap:10px;flex-wrap:wrap}
 .widget-badge{display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700;margin-right:4px;vertical-align:middle}
 .widget-badge.ok{background:rgba(53,208,127,.18);color:var(--green)}
 .widget-badge.warn{background:rgba(255,159,10,.18);color:var(--orange)}

@@ -304,3 +304,12 @@ canvas{display:block}
 #zoom-val{font-size:10px;color:var(--text);min-width:30px;text-align:center}
 #pgmgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:700;display:none;align-items:center;justify-content:center}
 #pgmgr-overlay.open{display:flex}
+.widget-card{margin:0 14px 8px;padding:10px 12px;background:#131b26;border:1px solid #243244;border-radius:8px}
+.widget-title{font-size:10px;font-weight:850;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.widget-body{font-size:11px;color:var(--text2);line-height:1.5}
+.widget-link{margin-top:6px;display:inline-block;font-size:10px;color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-align:left}
+.widget-link:hover{text-decoration:underline}
+.widget-badge{display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700;margin-right:4px;vertical-align:middle}
+.widget-badge.ok{background:rgba(53,208,127,.18);color:var(--green)}
+.widget-badge.warn{background:rgba(255,159,10,.18);color:var(--orange)}
+.widget-badge.error{background:rgba(255,90,82,.18);color:var(--red)}

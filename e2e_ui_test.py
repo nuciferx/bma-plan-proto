@@ -369,7 +369,11 @@ def _test_main_measurement_ui_cleanup(page):
                     setSidebarMode("sheets");
                     const sheetsRestored = document.getElementById("sidebar-content")?.style.display !== "none";
                     return !!(objVisible && sheetsHidden && propsVisible && objHidden && sheetsRestored);
-                })()
+                })(),
+                scaleStatusWidgetVisible: isVisible(document.querySelector("#scale-badge")),
+                pageInfoWidgetVisible: isVisible(document.querySelector("#lp-page-info")),
+                reviewWarningWidgetVisible: isVisible(document.querySelector("#widget-review-warnings")),
+                exportReadyWidgetVisible: isVisible(document.querySelector("#widget-export-ready"))
             };
         }"""
     )
@@ -413,6 +417,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"right panel layer counts or controls missing: {result}")
     if not result["leftPanelTabsOk"]:
         raise AssertionError(f"left panel tabs do not switch content correctly: {result}")
+    if not result.get("scaleStatusWidgetVisible"):
+        raise AssertionError(f"scale status widget (#scale-badge) not visible: {result}")
+    if not result.get("pageInfoWidgetVisible"):
+        raise AssertionError(f"page info widget (#lp-page-info) not visible: {result}")
+    if not result.get("reviewWarningWidgetVisible"):
+        raise AssertionError(f"review warning widget (#widget-review-warnings) not visible: {result}")
+    if not result.get("exportReadyWidgetVisible"):
+        raise AssertionError(f"export ready widget (#widget-export-ready) not visible: {result}")
     for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")

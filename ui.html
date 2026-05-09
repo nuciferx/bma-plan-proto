@@ -73,6 +73,15 @@
         <div class="wf-row" id="wf-review"><span class="wf-dot"></span><span>Review</span></div>
         <div class="wf-row" id="wf-export"><span class="wf-dot"></span><span>Export</span></div>
       </div>
+      <div id="widget-review-warnings" class="widget-card">
+        <div class="widget-title">Review Warnings</div>
+        <div id="widget-warn-body" class="widget-body"><span style="color:var(--text3)">เปิด PDF เพื่อดู warnings</span></div>
+        <button class="widget-link" onclick="if(totalPages)openCheckPanel();else alert('เปิด PDF ก่อน')">ดูรายละเอียด ›</button>
+      </div>
+      <div id="widget-export-ready" class="widget-card">
+        <div class="widget-title">Export Ready</div>
+        <div id="widget-export-body" class="widget-body"><span style="color:var(--text3)">เปิด PDF เพื่อดูสถานะ</span></div>
+      </div>
       <div id="sidebar-content"></div>
       <div id="lp-objects-content" style="display:none;flex:1;overflow-y:auto;padding:4px 0"></div>
       <div id="lp-properties-content" style="display:none;flex:1;overflow-y:auto;padding:8px 0"></div>
@@ -398,7 +407,8 @@ function updateAnalyseUI(d){const badge=document.getElementById("scale-badge");c
 function activeLayerLabel(){const sel=document.getElementById("active-layer-select");return sel?.selectedOptions?.[0]?.textContent?.replace(/^Layer:\s*/,"").trim()||"—";}
 function currentObjectCount(){return mLines.length+mRefs.length+mParking.length+mPolys.filter(p=>p.closed).length+mOpenings.filter(o=>o.closed).length;}
 function currentWarningCount(){let n=0;if(totalPages&&!getScaleForPage(curPage)&&currentObjectCount()>0)n++;for(const p of mPolys){if(p.closed&&!p.name)n++;}for(const o of mOpenings){if(o.closed&&!o.parentId)n++;}return n;}
-function updateBottomBar(){const name=pageNames[curPage]||`หน้า ${curPage||"—"}`;document.getElementById("bb-page-name").textContent=name;const obj=document.getElementById("lbl-objects");if(obj)obj.textContent=String(currentObjectCount());const warn=document.getElementById("lbl-warnings");if(warn)warn.textContent=String(currentWarningCount());const lyr=document.getElementById("lbl-layer");if(lyr)lyr.textContent=activeLayerLabel();}
+function updateBottomBar(){const name=pageNames[curPage]||`หน้า ${curPage||"—"}`;document.getElementById("bb-page-name").textContent=name;const obj=document.getElementById("lbl-objects");if(obj)obj.textContent=String(currentObjectCount());const warn=document.getElementById("lbl-warnings");if(warn)warn.textContent=String(currentWarningCount());const lyr=document.getElementById("lbl-layer");if(lyr)lyr.textContent=activeLayerLabel();updateWidgets();}
+function updateWidgets(){const hasPdf=!!totalPages&&!!currentCaseId;const warnEl=document.getElementById("widget-warn-body");const exportEl=document.getElementById("widget-export-body");if(warnEl){if(!hasPdf)warnEl.innerHTML='<span style="color:var(--text3)">เปิด PDF เพื่อดู warnings</span>';else{const wc=currentWarningCount();if(wc===0)warnEl.innerHTML='<span class="widget-badge ok">✓</span> ไม่พบ warning บนหน้านี้';else warnEl.innerHTML=`<span class="widget-badge warn">⚠ ${wc}</span> warnings พบบนหน้านี้`;}}if(exportEl){if(!hasPdf)exportEl.innerHTML='<span style="color:var(--text3)">เปิด PDF เพื่อดูสถานะ</span>';else{const oc=currentObjectCount(),sc=getScaleForPage(curPage)||pageData&&pageData.scale||null;const scTxt=sc?`<span style="color:var(--green)">✓ ${scaleLabel(sc)}</span>`:'<span style="color:var(--orange)">⚠ ยังไม่ตั้ง</span>';exportEl.innerHTML=`${totalPages} หน้า · ${oc} objects · Scale: ${scTxt}`;}}}
 // ══════════════════════════════════════════════════════
 // Fit/Zoom/Rotate
 // ══════════════════════════════════════════════════════

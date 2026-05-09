@@ -348,3 +348,13 @@ canvas{display:block}
 .isp-wf-row.warn{color:#ffd28a}.isp-wf-row.warn .isp-wf-dot{background:var(--orange)}
 .isp-next-action{font-size:11px;color:var(--cyan);padding:5px 0 2px;line-height:1.35}
 .rp-active-lyr{font-size:9px;font-weight:800;color:var(--blue);background:rgba(10,132,255,.14);border:1px solid rgba(10,132,255,.3);border-radius:4px;padding:1px 4px;margin-left:4px;letter-spacing:.3px;vertical-align:middle}
+#scale-mgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:490;display:none;align-items:center;justify-content:center}
+#scale-mgr-overlay.open{display:flex}
+#scale-mgr-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(90vw,560px);max-height:80vh;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7);overflow:hidden}
+#scale-mgr-header{display:flex;align-items:center;gap:8px}
+#scale-mgr-header h3{font-size:13px;font-weight:700;flex:1}
+#scale-mgr-body{overflow-y:auto;flex:1}
+.scmgr-table{width:100%;border-collapse:collapse;font-size:12px}
+.scmgr-table th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.scmgr-table td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04)}
+.scmgr-table td.ok{color:var(--green)}.scmgr-table td.warn{color:var(--orange)}

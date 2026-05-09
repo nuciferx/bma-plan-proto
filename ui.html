@@ -379,9 +379,9 @@ function buildSidebar(){
     const div=document.createElement("div");div.className="page-group";div.dataset.group=gk;
     div.innerHTML=`<div class="group-header" data-group="${gk}" onclick="toggleGroup('${gk}')"><span class="arrow ${isCollapsed?'':'open'}">▶</span>${g.label}<span class="count">${g.pages.length}</span></div><div class="group-body ${isCollapsed?'hidden':''}">${g.pages.map(n=>{
       const tag=pageTags[n]||"",name=pageNames[n]||`หน้า ${n}`,excl=excludedPages.has(n),isActive=n===curPage;
-      const store=pageStore[n],cnt=store?(store.lines?.length||0)+(store.polys?.filter(p=>p.closed).length||0):0;
+      const store=pageStore[n],cnt=store?(store.lines?.length||0)+(store.polys?.filter(p=>p.closed).length||0):0;const hasSc=!!getScaleForPage(n);const needsWarn=cnt>0&&!hasSc&&!excl;
       visibleCount++;
-      return`<div class="pg-thumb ${isActive?'active':''} ${excl?'hidden':''}" data-page="${n}" onclick="loadPage(${n})" oncontextmenu="pageCtxMenu(event,${n})"><img src="${thumbUrl(n)}" loading="lazy"><div class="pg-label">${name}</div>${tag?`<div class="pg-tag ${tag}"></div>`:''}${!excl?`<button class="pg-hide" onclick="event.stopPropagation();excludePage(${n})" title="ซ่อน">×</button>`:''}${excl?`<button class="pg-restore" onclick="event.stopPropagation();restorePage2(${n})" title="แสดง">↩</button>`:''}${cnt?`<div class="pg-dot">${cnt}</div>`:''}</div>`;
+      return`<div class="pg-thumb ${isActive?'active':''} ${excl?'hidden':''}" data-page="${n}" onclick="loadPage(${n})" oncontextmenu="pageCtxMenu(event,${n})"><img src="${thumbUrl(n)}" loading="lazy"><div class="pg-label">${name}</div>${tag?`<div class="pg-tag ${tag}"></div>`:''}${!excl?`<button class="pg-hide" onclick="event.stopPropagation();excludePage(${n})" title="ซ่อน">×</button>`:''}${excl?`<button class="pg-restore" onclick="event.stopPropagation();restorePage2(${n})" title="แสดง">↩</button>`:''}${cnt?`<div class="pg-dot">${cnt}</div>`:''}${needsWarn?'<div class="pg-warn" title="หน้านี้มี object แต่ยังไม่มี Scale">⚠</div>':''}</div>`;
     }).join('')}</div>`;
     content.appendChild(div);
   }

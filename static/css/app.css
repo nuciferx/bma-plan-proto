@@ -123,6 +123,7 @@ button,input,select{font-family:inherit}button{cursor:pointer}
 .pg-thumb:hover .pg-hide{opacity:1}
 .pg-thumb .pg-restore{position:absolute;top:1px;right:1px;width:16px;height:16px;border-radius:50%;background:rgba(48,209,88,.2);color:var(--green);font-size:10px;line-height:16px;text-align:center;border:none;cursor:pointer}
 .pg-thumb .pg-dot{position:absolute;bottom:18px;right:2px;font-size:7px;color:var(--blue)}
+.pg-thumb .pg-warn{position:absolute;top:2px;left:2px;font-size:9px;line-height:1;color:var(--orange);background:rgba(255,159,10,.22);border-radius:3px;padding:1px 3px;pointer-events:none}
 #cc{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;box-shadow:0 18px 60px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.12);background:#fff}
 .canvas-top-bar{position:absolute;top:8px;left:12px;right:12px;min-height:30px;z-index:125;display:flex;align-items:center;gap:8px;overflow:hidden;pointer-events:none;color:var(--text2);font-size:11px}
 .canvas-top-bar span{display:inline-flex;align-items:center;max-width:190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:rgba(12,18,25,.82);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:5px 8px;box-shadow:0 8px 20px rgba(0,0,0,.22);backdrop-filter:blur(8px)}

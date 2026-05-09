@@ -4,6 +4,7 @@ server.py — PDF Scale Backend v4
 เปิด: http://localhost:8000
 """
 import io, math, re, json, tempfile, os, time
+from collections import defaultdict
 from typing import Optional
 from uuid import uuid4
 
@@ -1287,6 +1288,102 @@ async def export_xlsx(body: dict):
                 ws6.write(r6, 11, ref_meta["lawBasis"] or "", fmt_cell)
                 ws6.write(r6, 12, ref_meta["countingRule"], fmt_cell)
                 r6 += 1
+
+    # ── Sheet 7: สรุปตาม Report Target ──
+    ws7 = wb.add_worksheet("สรุปตาม Report Target")
+    ws7.set_column(0, 0, 28); ws7.set_column(1, 1, 18); ws7.set_column(2, 2, 18)
+    ws7.set_column(3, 3, 28); ws7.set_column(4, 4, 12); ws7.set_column(5, 6, 16); ws7.set_column(7, 7, 16)
+    r7 = 0
+    fmt_rt_title = wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"})
+    ws7.merge_range(r7, 0, r7, 7, "สรุปตาม Report Target", fmt_rt_title)
+    r7 += 2
+    for c, h in enumerate(["Report Target", "Object Category", "Counting Rule", "Pages", "Objects", "Area (m²)", "Length (m)", "Parking"]):
+        ws7.write(r7, c, h, fmt_hdr)
+    r7 += 1
+    RT_ORDER = ["Building Area Summary", "Use Category Summary", "Open Space Summary", "Deduction Summary",
+                "Parking Summary", "Site Facts", "Distance Facts", "Height Facts", "Audit Log", "Unclassified"]
+    rt_stats: dict = {}
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg_data = page_store[pg_str]
+        pg_name = page_names.get(pg_str, f"หน้า {pg_str}")
+        scale_info7 = page_scales.get(pg_str, {})
+        pts_per_m7 = scale_info7.get("pts_per_m", 0) if isinstance(scale_info7, dict) else 0
+        for poly in pg_data.get("polys", []):
+            if not poly.get("closed"):
+                continue
+            sem = poly.get("semanticTag") or _semantic_tag("poly", poly)
+            meta = _get_meta(poly, sem)
+            key = (meta["reportTarget"] or "Unclassified", meta["objectCategory"] or "annotation", meta["countingRule"] or "reference")
+            if key not in rt_stats:
+                rt_stats[key] = {"pages": set(), "objects": 0, "area": 0.0, "length": 0.0, "parking": 0}
+            rt_stats[key]["pages"].add(pg_name); rt_stats[key]["objects"] += 1
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m7 > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m7 ** 2)
+            rt_stats[key]["area"] += area
+        for op in pg_data.get("openings", []):
+            if not op.get("closed"):
+                continue
+            sem = op.get("semanticTag") or _semantic_tag("opening", op)
+            meta = _get_meta(op, sem)
+            key = (meta["reportTarget"] or "Unclassified", meta["objectCategory"] or "annotation", meta["countingRule"] or "reference")
+            if key not in rt_stats:
+                rt_stats[key] = {"pages": set(), "objects": 0, "area": 0.0, "length": 0.0, "parking": 0}
+            rt_stats[key]["pages"].add(pg_name); rt_stats[key]["objects"] += 1
+            area = op.get("area", 0) or 0
+            if area <= 0 and op.get("pts") and pts_per_m7 > 0:
+                area = _poly_area_pt2(op["pts"]) / (pts_per_m7 ** 2)
+            rt_stats[key]["area"] += area
+        for ln in pg_data.get("lines", []):
+            sem = ln.get("semanticTag") or _semantic_tag("line", ln)
+            meta = _get_meta(ln, sem)
+            key = (meta["reportTarget"] or "Unclassified", meta["objectCategory"] or "annotation", meta["countingRule"] or "reference")
+            if key not in rt_stats:
+                rt_stats[key] = {"pages": set(), "objects": 0, "area": 0.0, "length": 0.0, "parking": 0}
+            rt_stats[key]["pages"].add(pg_name); rt_stats[key]["objects"] += 1
+            if pts_per_m7 > 0:
+                rt_stats[key]["length"] += _line_length_pt(_line_points(ln)) / pts_per_m7
+        for ref in pg_data.get("refs", []):
+            sem = ref.get("semanticTag") or _semantic_tag("ref", ref)
+            meta = _get_meta(ref, sem)
+            key = (meta["reportTarget"] or "Unclassified", meta["objectCategory"] or "annotation", meta["countingRule"] or "reference")
+            if key not in rt_stats:
+                rt_stats[key] = {"pages": set(), "objects": 0, "area": 0.0, "length": 0.0, "parking": 0}
+            rt_stats[key]["pages"].add(pg_name); rt_stats[key]["objects"] += 1
+            if pts_per_m7 > 0:
+                rt_stats[key]["length"] += _line_length_pt(_line_points(ref)) / pts_per_m7
+        for park in pg_data.get("parking", []):
+            sem = park.get("semanticTag") or _semantic_tag("parking", park)
+            meta = _get_meta(park, sem)
+            key = (meta["reportTarget"] or "Unclassified", meta["objectCategory"] or "annotation", meta["countingRule"] or "reference")
+            if key not in rt_stats:
+                rt_stats[key] = {"pages": set(), "objects": 0, "area": 0.0, "length": 0.0, "parking": 0}
+            rt_stats[key]["pages"].add(pg_name); rt_stats[key]["objects"] += 1
+            rt_stats[key]["parking"] += park.get("count") or 1
+    sorted_keys = sorted(rt_stats.keys(), key=lambda k: (RT_ORDER.index(k[0]) if k[0] in RT_ORDER else 99, k[1], k[2]))
+    for key in sorted_keys:
+        rt, cat, cr = key
+        stats = rt_stats[key]
+        ws7.write(r7, 0, rt, fmt_cell)
+        ws7.write(r7, 1, cat, fmt_cell)
+        ws7.write(r7, 2, cr, fmt_cell)
+        ws7.write(r7, 3, ", ".join(sorted(stats["pages"])), fmt_note)
+        ws7.write(r7, 4, stats["objects"], fmt_cell)
+        ws7.write(r7, 5, round(stats["area"], 2) if stats["area"] > 0 else "", fmt_num if stats["area"] > 0 else fmt_cell)
+        ws7.write(r7, 6, round(stats["length"], 2) if stats["length"] > 0 else "", fmt_num if stats["length"] > 0 else fmt_cell)
+        ws7.write(r7, 7, stats["parking"] if stats["parking"] > 0 else "", fmt_cell)
+        r7 += 1
+    if rt_stats:
+        ws7.write(r7, 0, "รวม", fmt_hdr)
+        for c in range(1, 4):
+            ws7.write(r7, c, "", fmt_cell)
+        ws7.write(r7, 4, sum(s["objects"] for s in rt_stats.values()), fmt_total)
+        tot_area = sum(s["area"] for s in rt_stats.values())
+        tot_len = sum(s["length"] for s in rt_stats.values())
+        tot_park = sum(s["parking"] for s in rt_stats.values())
+        ws7.write(r7, 5, round(tot_area, 2) if tot_area > 0 else "", fmt_total if tot_area > 0 else fmt_cell)
+        ws7.write(r7, 6, round(tot_len, 2) if tot_len > 0 else "", fmt_total if tot_len > 0 else fmt_cell)
+        ws7.write(r7, 7, tot_park if tot_park > 0 else "", fmt_total if tot_park > 0 else fmt_cell)
 
     wb.close(); buf.seek(0)
     safe = pdf_name.replace("/", "_").replace("\\", "_").replace(".pdf", "")

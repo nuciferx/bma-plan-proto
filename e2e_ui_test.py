@@ -1251,7 +1251,7 @@ def _test_opening_and_xlsx_export(page, download_dir: Path):
     with zipfile.ZipFile(xlsx_target) as zf:
         workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
         shared_xml = zf.read("xl/sharedStrings.xml").decode("utf-8")
-    for sheet in ["Cover", "Warnings", "Page Scales", "Site Facts", "Audit Log", "สรุปพื้นที่", "ความยาวเส้น Polygon", "สรุปตามชั้น", "สรุปตามประเภท"]:
+    for sheet in ["Cover", "Warnings", "Page Scales", "Site Facts", "Audit Log", "สรุปพื้นที่", "ความยาวเส้น Polygon", "สรุปตามชั้น", "สรุปตามประเภท", "สรุปตาม Report Target"]:
         if sheet not in workbook_xml:
             raise AssertionError(f"XLSX missing sheet {sheet!r}")
     for text in [VECTOR_POLY_NAME, VECTOR_OPENING_NAME, "รวมสุทธิ", "BMA-Plan Phase 1 Export", "UI pageStore", "REQ-XLSX-E2E", "site-e2e", "N / ทิศเหนือ", "front_road", "ถนนหน้าโครงการ"]:

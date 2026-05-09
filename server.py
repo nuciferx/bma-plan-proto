@@ -1295,7 +1295,7 @@ async def export_xlsx(body: dict):
 
 
 # Load UI from external file (hot-reload on change)
-UI_PATH = os.path.join(os.path.dirname(__file__), "ui.html")
+UI_PATH = Path(__file__).resolve().parent / "ui.html"
 _HTML_CACHE = None
 _HTML_MTIME = 0
 

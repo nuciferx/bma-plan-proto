@@ -1,4 +1,4 @@
-﻿*{box-sizing:border-box;margin:0;padding:0}
+*{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#090b10;--surface:#10151d;--surface2:#171f2a;--surface3:#202a36;--border:#273241;--text:#eef3f8;--text2:#a7b2bf;--text3:#687487;--blue:#0a84ff;--green:#35d07f;--red:#ff5a52;--orange:#ffb020;--yellow:#ffd766;--purple:#bf5af2;--cyan:#5ac8fa;--tag-site:#35d07f;--tag-plan:#2f8cff;--tag-elev:#bf5af2;--tag-detail:#ffb020;--sidebar-w:236px;--rightbar-w:300px;--topbar-h:48px;--bottombar-h:38px;--font-label:500;--font-action:600;--font-data:400;--text-xs:11px;--text-sm:12px;--text-base:14px;--text-lg:16px}
 html,body{height:100%;overflow:hidden}
 body{font-family:"Inter","Noto Sans Thai","Sarabun",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);font-size:13px;letter-spacing:0}

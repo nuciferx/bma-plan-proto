@@ -545,8 +545,12 @@ def _test_backend_cache_limits():
         raise AssertionError(f"XLSX page scale audit export failed: {xlsx.status_code}")
     with zipfile.ZipFile(io.BytesIO(xlsx.content)) as zf:
         scales_xml = _xlsx_sheet_xml(zf, "Page Scales")
+        scales_shared = zf.read("xl/sharedStrings.xml").decode("utf-8")
     if scales_xml.count("<row ") < 4:
         raise AssertionError("Page Scales sheet did not include all pages from 1..pageCount")
+    for col_header in ["scale_state", "object_count", "needs_attention"]:
+        if col_header not in scales_shared:
+            raise AssertionError(f"Page Scales sheet missing audit column header {col_header!r}")
 
     return {
         "entries": len(cache),

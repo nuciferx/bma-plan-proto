@@ -789,6 +789,12 @@ def _get_meta(obj: dict, semantic_tag: str) -> dict:
         "countingRule": obj.get("countingRule") or derived["countingRule"],
     }
 
+def _scale_state_py(sc: dict) -> str:
+    if not sc: return "missing"
+    if sc.get("calibrated") or sc.get("source") == "manual": return "manual"
+    if sc.get("verified"): return "ok"
+    return "warn"
+
 def _semantic_tag(kind: str, obj: dict | None = None) -> str:
     obj = obj or {}
     if kind == "poly":
@@ -902,13 +908,25 @@ async def export_xlsx(body: dict):
 
     ws_scales = wb.add_worksheet("Page Scales")
     ws_scales.set_column(0, 0, 10); ws_scales.set_column(1, 1, 24); ws_scales.set_column(2, 6, 18)
-    for c, h in enumerate(["page", "page_name", "label", "pts_per_m", "source", "verified", "status"]):
+    ws_scales.set_column(7, 9, 16)
+    for c, h in enumerate(["page", "page_name", "label", "pts_per_m", "source", "verified", "status",
+                            "scale_state", "object_count", "needs_attention"]):
         ws_scales.write(0, c, h, fmt_hdr)
     scale_row = 1
     for pg in range(1, max(page_count, 0) + 1):
         pg_str = str(pg)
         sc = page_scales.get(pg_str, {}) if isinstance(page_scales, dict) else {}
         if sc is None: sc = {}
+        pg_data = page_store.get(pg_str, {})
+        obj_count = (
+            len([p for p in pg_data.get("polys", []) if p.get("closed")]) +
+            len([o for o in pg_data.get("openings", []) if o.get("closed")]) +
+            len(pg_data.get("lines", [])) +
+            len(pg_data.get("refs", [])) +
+            len(pg_data.get("parking", []))
+        )
+        state = _scale_state_py(sc)
+        attention = obj_count > 0 and state not in ("ok", "manual")
         ws_scales.write(scale_row, 0, pg, fmt_cell)
         ws_scales.write(scale_row, 1, page_names.get(pg_str, f"หน้า {pg_str}"), fmt_cell)
         ws_scales.write(scale_row, 2, sc.get("label", ""), fmt_cell)
@@ -916,6 +934,9 @@ async def export_xlsx(body: dict):
         ws_scales.write(scale_row, 4, sc.get("source", ""), fmt_cell)
         ws_scales.write(scale_row, 5, bool(sc.get("verified", False)), fmt_cell)
         ws_scales.write(scale_row, 6, sc.get("status", ""), fmt_cell)
+        ws_scales.write(scale_row, 7, state, fmt_cell)
+        ws_scales.write(scale_row, 8, obj_count, fmt_cell)
+        ws_scales.write(scale_row, 9, attention, fmt_cell)
         scale_row += 1
 
     ws_facts = wb.add_worksheet("Site Facts")

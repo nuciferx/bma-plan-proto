@@ -15,6 +15,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 try:
     import xlsxwriter
@@ -34,6 +35,10 @@ from export.xlsx_helpers import (
 )
 
 app = FastAPI()
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 CASES: dict = {}
 PT_PER_MM = 72 / 25.4

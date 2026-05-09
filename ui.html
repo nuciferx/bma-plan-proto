@@ -346,7 +346,7 @@ function saveCurrentPage(){normalizeCurrentObjects();const s=getStore(curPage);s
 function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;updatePageSummary(n);}
 function getNextPage(n){for(let i=n+1;i<=totalPages;i++)if(!excludedPages.has(i))return i;return null;}
 function getPrevPage(n){for(let i=n-1;i>=1;i--)if(!excludedPages.has(i))return i;return null;}
-function setWorkflowState(id,state){const el=document.getElementById(id);if(!el)return;el.classList.toggle("done",state==="done");el.classList.toggle("warn",state==="warn");}
+function setWorkflowState(id,state){const el=document.getElementById(id);if(!el)return;el.classList.toggle("done",state==="done");el.classList.toggle("warn",state==="warn");el.classList.toggle("current",state==="current");}
 function updateWorkspaceState(){
   const hasPdf=!!totalPages&&!!currentCaseId;
   document.getElementById("empty-state")?.classList.toggle("hidden",hasPdf);
@@ -360,11 +360,11 @@ function updateWorkspaceState(){
     else{notice.classList.add("warn");title.textContent="ยังไม่ได้ตั้ง Scale — ค่าพื้นที่ยังใช้จริงไม่ได้";desc.textContent="กรุณาตั้ง Scale ก่อนวัดพื้นที่เพื่อให้ค่าพื้นที่ถูกต้อง";}
   }
   const store=getStore(curPage),hasArea=(curPage&&((mPolys.length)||(store.polys||[]).length)),hasOpening=(curPage&&((mOpenings.length)||(store.openings||[]).length)),hasObjects=hasArea||hasOpening||mLines.length||mRefs.length||mParking.length;
-  setWorkflowState("wf-open",hasPdf?"done":"");
-  setWorkflowState("wf-scale",scale?"done":hasPdf?"warn":"");
-  setWorkflowState("wf-page-setup",hasPdf?"warn":"");
-  setWorkflowState("wf-measure",hasObjects?"done":scale?"warn":"");
-  setWorkflowState("wf-review",hasObjects?"warn":"");
+  setWorkflowState("wf-open",hasPdf?"done":"current");
+  setWorkflowState("wf-scale",scale?"done":hasPdf?"current":"");
+  setWorkflowState("wf-page-setup",Object.keys(pageTags).length>0?"done":hasPdf&&scale?"current":"");
+  setWorkflowState("wf-measure",hasObjects?"done":hasPdf&&scale?"warn":"");
+  setWorkflowState("wf-review",hasObjects&&currentWarningCount()===0?"done":hasObjects?"warn":"");
   setWorkflowState("wf-export",hasObjects?"warn":"");
   const scBtn=document.getElementById("btn-scale-current");if(scBtn)scBtn.classList.toggle("scale-cta",hasPdf&&!scale);
   const pageInfoEl=document.getElementById("lp-page-info");if(pageInfoEl){if(hasPdf&&curPage){const tag=pageTags[curPage]||"",tagLabel=TAG_LABELS[tag]||"";const sc=getScaleForPage(curPage)||pageData?.scale||null;const scTxt=sc?scaleLabel(sc):"ยังไม่มี scale";const pgName=pageNames[curPage]||`หน้า ${curPage}`;pageInfoEl.textContent=`${pgName}${tagLabel?" · "+tagLabel:""} · ${scTxt}`;}else pageInfoEl.textContent="";}

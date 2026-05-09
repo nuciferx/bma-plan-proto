@@ -1067,6 +1067,7 @@ function openingProbePoints(op){const pts=op?.pts||[];if(!pts.length)return[];co
 function openingInsidePoly(op,poly){if(!op?.closed||!poly?.closed||(op.pts||[]).length<3||(poly.pts||[]).length<3)return false;return openingProbePoints(op).every(p=>ptInPoly(p.x,p.y,poly.pts));}
 function openingParentCandidates(op,polys){return(polys||[]).filter(p=>openingInsidePoly(op,p));}
 function linkOpeningParent(op,polys){
+  if(op.parentManual&&op.parentId){op.parentStatus="linked";op.parentCandidateIds=[];return polys.find(p=>String(p.id)===String(op.parentId))||null;}
   const existing=op.parentId?polys.find(p=>String(p.id)===String(op.parentId)):null;
   if(existing&&openingInsidePoly(op,existing)){op.parentStatus="linked";op.parentCandidateIds=[existing.id];return existing;}
   const candidates=openingParentCandidates(op,polys);
@@ -1096,7 +1097,7 @@ function buildRightPanel(){normalizeCurrentObjects();const content=document.getE
     if(sel.type==="poly"){const opts=Object.entries(AREA_LABELS).map(([k,l])=>`<option value="${k}" ${obj.areaType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Type</label><select onchange="rpSetAreaType(this.value)">${opts}</select>`;}
     if(sel.type==="ref"){const opts=Object.entries(REF_LABELS).map(([k,l])=>`<option value="${k}" ${obj.refType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Ref type</label><select onchange="rpSetRefType(this.value)">${opts}</select>`;}
     if(sel.type==="parking"){const opts=Object.entries(PARKING_LABELS).map(([k,l])=>`<option value="${k}" ${obj.parkingType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Parking</label><select onchange="rpSetParkingType(this.value)">${opts}</select>`;}
-    if(sel.type==="opening"){const pName=parentNameForOpening(obj);html+=`<label>Parent</label><div>${pName?escHtml(pName):escHtml(obj.parentStatus||"unlinked")}</div>`;}
+    if(sel.type==="opening"){if(obj.parentStatus==="linked"){const pName=parentNameForOpening(obj);html+=`<label>Parent</label><div>${pName?escHtml(pName):escHtml(obj.parentStatus)}</div>`;}else{const polyOpts=mPolys.filter(p=>p.closed).map(p=>{const pid=escHtml(p.id||"");const pn=escHtml(objDisplayName({type:"poly",idx:mPolys.indexOf(p)},p));return`<option value="${pid}" ${p.id===obj.parentId?"selected":""}>${pn}</option>`;}).join("");html+=`<label>Parent</label><select id="rp-opening-parent" onchange="rpSetOpeningParent(this.value)"><option value="">— เลือก parent —</option>${polyOpts}</select>`;}}
     const semOpts=semanticOptionsFor(sel,obj).map(k=>`<option value="${k}" ${obj.semanticTag===k?"selected":""}>${escHtml(SEMANTIC_TAG_LABELS[k]||k)}</option>`).join("");
     const useEnabled=isAreaSemanticTag(obj.semanticTag);
     const useOpts=`<option value="" ${obj.useCategory==null?"selected":""}>—</option>`+Object.entries(USE_CATEGORY_LABELS).map(([k,l])=>`<option value="${k}" ${obj.useCategory===k?"selected":""}>${escHtml(l)}</option>`).join("");
@@ -1118,6 +1119,7 @@ function rpSetSemanticTag(v){const obj=selectedObj(selItem);if(!obj||!v)return;p
 function rpSetUseCategory(v){const obj=selectedObj(selItem);if(!obj||!isAreaSemanticTag(obj.semanticTag))return;pushUndo();obj.useCategory=v||null;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
 function rpSetRefType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="ref")return;pushUndo();obj.refType=v;redraw();buildRightPanel();}
 function rpSetParkingType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="parking")return;pushUndo();obj.parkingType=v;updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetOpeningParent(id){const obj=selectedObj(selItem);if(!obj||selItem.type!=="opening"||!id)return;pushUndo();obj.parentId=id;obj.parentStatus="linked";obj.parentManual=true;saveCurrentPage();updatePageSummary(curPage);updateBottomBar();redraw();buildRightPanel();}
 function rpSetColor(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.color=v;syncColorBar(selItem);redraw();buildRightPanel();}
 function rpSetOpacity(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.opacity=(+v)/100;syncColorBar(selItem);redraw();buildRightPanel();}
 function rpSetLabelMode(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.label={...(obj.label||{}),mode:v==="hidden"?"hidden":"auto"};redraw();buildRightPanel();}

@@ -874,6 +874,12 @@ def _test_selection_and_area_type_helpers(page):
             mOpenings.push({pts: [{x: raw(200), y: raw(200)}, {x: raw(210), y: raw(200)}, {x: raw(210), y: raw(210)}, {x: raw(200), y: raw(210)}], closed: true, name: "UNLINKED", id: "op-unlinked", color: "#ff453a", opacity: 0.6});
             const unlinkedWarnings = phase1Warnings(collectAreas()).filter(w => w.object_id === "op-unlinked" && w.page_index === curPage);
             const idsPresent = [mPolys[0], mOpenings[0], mRefs[0], mLines[0], mParking[0]].every(o => !!o.id);
+            // Parent reassignment: use the unlinked opening (idx 1) pushed above
+            selItem = {type: "opening", idx: 1};
+            buildRightPanel();
+            const parentSelectVisible = !!document.querySelector("#rp-opening-parent");
+            rpSetOpeningParent(mPolys[0].id);
+            const parentReassigned = mOpenings[1].parentId === mPolys[0].id && mOpenings[1].parentStatus === "linked";
             return {
                 before,
                 cbType,
@@ -912,7 +918,9 @@ def _test_selection_and_area_type_helpers(page):
                 refStillVisible,
                 idsPresent,
                 structuredWarnings: warnings.every(w => w.id && "page_index" in w && "object_id" in w && w.suggested_action),
-                unlinkedWarnings: unlinkedWarnings.length
+                unlinkedWarnings: unlinkedWarnings.length,
+                parentSelectVisible,
+                parentReassigned
             };
         }"""
     )
@@ -976,6 +984,10 @@ def _test_selection_and_area_type_helpers(page):
         raise AssertionError(f"reference layer lock failed: {result}")
     if not result["structuredWarnings"] or result["unlinkedWarnings"] < 1:
         raise AssertionError(f"structured QA warnings failed: {result}")
+    if not result["parentSelectVisible"]:
+        raise AssertionError(f"parent reassignment select not shown for unlinked opening: {result}")
+    if not result["parentReassigned"]:
+        raise AssertionError(f"rpSetOpeningParent did not link opening to poly: {result}")
     return result
 
 

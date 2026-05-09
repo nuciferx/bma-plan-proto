@@ -1,21 +1,43 @@
 """
-server.py — PDF Scale Prototype Backend v3
+server.py — PDF Scale Backend v4
 รัน: python server.py
 เปิด: http://localhost:8000
 """
-import io, math, re, json, tempfile
+import io, math, re, json, tempfile, os, time
 from typing import Optional
+from uuid import uuid4
+
+import ctypes
 
 import fitz
+import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response, FileResponse
+
+try:
+    import xlsxwriter
+    HAS_XLSX = True
+except ImportError:
+    HAS_XLSX = False
 
 app = FastAPI()
 
-SESSION: dict = {}
+CASES: dict = {}
 PT_PER_MM = 72 / 25.4
 SCALE_RE  = re.compile(r'1\s*[:/]\s*(\d{2,5})', re.IGNORECASE)
-SNAP_GRID = 25   # PDF pt — 1 snap per cell
+SNAP_GRID = 8   # PDF pt — fine dedupe for CAD-like snap points
+MAX_SNAP_POINTS = 12000
+MAX_SNAP_LINES = 12000
+MAX_UPLOAD_BYTES = 80 * 1024 * 1024
+CASE_TTL_SECONDS = 2 * 60 * 60
+MAX_CASES = 12
+MIN_RENDER_SCALE = 0.1
+MAX_RENDER_SCALE = 3.0
+MAX_IMAGE_CACHE_ENTRIES = 24
+MAX_IMAGE_CACHE_BYTES = 128 * 1024 * 1024
+MAX_ANALYSE_CACHE_ENTRIES = 24
+MAX_ANALYSE_CACHE_BYTES = 64 * 1024 * 1024
 
 
 # ══════════════════════════════════════════════════════
@@ -34,67 +56,279 @@ def detect_scale(page: fitz.Page) -> Optional[dict]:
     best = max(spans, key=lambda s: s["size"])
     N = best["N"]
     return {"N": N, "label": f"1:{N}",
-            "pts_per_m": round((1000 / N) * PT_PER_MM, 4)}
+            "pts_per_m": round((1000 / N) * PT_PER_MM, 4),
+            "source": "auto", "verified": False}
 
 
-def extract_snaps_typed(drawings: list, max_snaps=2000, max_lines=2000):
+def _cleanup_file(path: Optional[str]):
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _make_case(doc: fitz.Document, path: str):
+    _prune_cases()
+    case_id = uuid4().hex
+    CASES[case_id] = {
+        "doc": doc,
+        "path": path,
+        "page_cache": {},
+        "image_cache": {},
+        "page_tags": {},
+        "project_info": {},
+        "created_at": time.time(),
+        "last_access": time.time(),
+    }
+    return case_id
+
+
+def _close_case(case: dict):
+    doc = case.get("doc")
+    if doc:
+        try:
+            doc.close()
+        except Exception:
+            pass
+    _cleanup_file(case.get("path"))
+
+
+def _prune_cases():
+    now = time.time()
+    stale = [cid for cid, case in CASES.items() if now - case.get("last_access", case.get("created_at", now)) > CASE_TTL_SECONDS]
+    for cid in stale:
+        _close_case(CASES.pop(cid, {}))
+    if len(CASES) < MAX_CASES:
+        return
+    ordered = sorted(CASES.items(), key=lambda kv: kv[1].get("last_access", 0))
+    for cid, case in ordered[: max(0, len(CASES) - MAX_CASES + 1)]:
+        _close_case(case)
+        CASES.pop(cid, None)
+
+
+def _get_case(case_id: str):
+    if not case_id:
+        return None
+    _prune_cases()
+    case = CASES.get(case_id)
+    if case:
+        case["last_access"] = time.time()
+    return case
+
+
+def _require_page(doc: fitz.Document, n: int):
+    if n < 1 or n > len(doc):
+        return None
+    return doc[n - 1]
+
+
+def _normalize_render_scale(scale: float) -> Optional[float]:
+    if not math.isfinite(scale):
+        return None
+    if scale < MIN_RENDER_SCALE or scale > MAX_RENDER_SCALE:
+        return None
+    return round(scale, 3)
+
+
+def _cache_size_bytes(cache: dict) -> int:
+    return sum(len(v) for v in cache.values() if isinstance(v, (bytes, bytearray)))
+
+
+def _cache_get(cache: dict, key):
+    if key not in cache:
+        return None
+    value = cache.pop(key)
+    cache[key] = value
+    return value
+
+
+def _cache_put(cache: dict, key, value: bytes, max_entries: int, max_bytes: int):
+    if key in cache:
+        cache.pop(key)
+    cache[key] = value
+    while cache and (len(cache) > max_entries or _cache_size_bytes(cache) > max_bytes):
+        oldest = next(iter(cache))
+        cache.pop(oldest, None)
+    return value
+
+
+def _pt_key(x: float, y: float, grid: int = SNAP_GRID):
+    return (int(x / grid), int(y / grid))
+
+
+def _line_key(x0: float, y0: float, x1: float, y1: float):
+    a = (round(x0, 1), round(y0, 1))
+    b = (round(x1, 1), round(y1, 1))
+    return tuple(sorted((a, b)))
+
+
+def _add_point(grid: dict, x: float, y: float):
+    k = _pt_key(x, y)
+    if k not in grid:
+        grid[k] = (round(x, 1), round(y, 1))
+
+
+def _add_line(lines_out: list, line_seen: set, x0: float, y0: float, x1: float, y1: float, max_lines: int):
+    if len(lines_out) >= max_lines:
+        return False
+    if math.hypot(x1 - x0, y1 - y0) < 0.5:
+        return False
+    k = _line_key(x0, y0, x1, y1)
+    if k in line_seen:
+        return False
+    line_seen.add(k)
+    lines_out.append([round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)])
+    return True
+
+
+def _pack_snap_result(ep_grid, mp_grid, ct_grid, lines_out, max_snaps, max_lines, meta):
+    ep = list(ep_grid.values())
+    mp = list(mp_grid.values())
+    ct = list(ct_grid.values())
+    snaps  = [{"x": v[0], "y": v[1], "t": "ep"} for v in ep[: max_snaps // 2]]
+    snaps += [{"x": v[0], "y": v[1], "t": "mp"} for v in mp[: max_snaps // 4]]
+    snaps += [{"x": v[0], "y": v[1], "t": "ct"} for v in ct[: max_snaps // 4]]
+    meta.update({
+        "raw_ep": len(ep),
+        "raw_mp": len(mp),
+        "raw_ct": len(ct),
+        "raw_lines": len(lines_out),
+        "returned_snaps": len(snaps),
+        "returned_lines": len(lines_out[:max_lines]),
+        "snap_grid_pt": SNAP_GRID,
+        "max_snaps": max_snaps,
+        "max_lines": max_lines,
+    })
+    return snaps, lines_out[:max_lines], meta
+
+
+def extract_snaps_typed(drawings: list, max_snaps=MAX_SNAP_POINTS, max_lines=MAX_SNAP_LINES):
     """Returns (snaps, lines).
     snaps: [{x,y,t}]  t = ep|mp|ct
     lines: [[x0,y0,x1,y1], ...]  for NL/IX client-side snap
     """
     ep_grid, mp_grid, ct_grid = {}, {}, {}
     lines_out = []
+    line_seen = set()
+    meta = {"path_objects": len(drawings), "segments": 0, "engine": "pymupdf"}
 
     for d in drawings:
         for item in d["items"]:
             op = item[0]
+            meta["segments"] += 1
             if op == "l":
                 p1, p2 = item[1], item[2]
                 # EP – endpoints
                 for pt in [p1, p2]:
-                    k = (int(pt.x / SNAP_GRID), int(pt.y / SNAP_GRID))
-                    if k not in ep_grid:
-                        ep_grid[k] = (round(pt.x, 1), round(pt.y, 1))
+                    _add_point(ep_grid, pt.x, pt.y)
                 # MP – midpoint
                 mx, my = (p1.x + p2.x) / 2, (p1.y + p2.y) / 2
-                k = (int(mx / SNAP_GRID), int(my / SNAP_GRID))
-                if k not in mp_grid:
-                    mp_grid[k] = (round(mx, 1), round(my, 1))
+                _add_point(mp_grid, mx, my)
                 # lines for NL/IX
-                if len(lines_out) < max_lines:
-                    lines_out.append([round(p1.x,1), round(p1.y,1),
-                                      round(p2.x,1), round(p2.y,1)])
+                _add_line(lines_out, line_seen, p1.x, p1.y, p2.x, p2.y, max_lines)
             elif op == "re":
                 r = item[1]
                 # EP – corners
                 for pt in [(r.x0,r.y0),(r.x1,r.y0),(r.x1,r.y1),(r.x0,r.y1)]:
-                    k = (int(pt[0] / SNAP_GRID), int(pt[1] / SNAP_GRID))
-                    if k not in ep_grid:
-                        ep_grid[k] = (round(pt[0],1), round(pt[1],1))
+                    _add_point(ep_grid, pt[0], pt[1])
                 # CT – rectangle center
                 cx2, cy2 = (r.x0+r.x1)/2, (r.y0+r.y1)/2
-                k = (int(cx2 / SNAP_GRID), int(cy2 / SNAP_GRID))
-                if k not in ct_grid:
-                    ct_grid[k] = (round(cx2,1), round(cy2,1))
+                _add_point(ct_grid, cx2, cy2)
                 # edges as lines
-                if len(lines_out) < max_lines:
-                    for seg in [(r.x0,r.y0,r.x1,r.y0),(r.x1,r.y0,r.x1,r.y1),
-                                (r.x1,r.y1,r.x0,r.y1),(r.x0,r.y1,r.x0,r.y0)]:
-                        lines_out.append([round(v,1) for v in seg])
+                for seg in [(r.x0,r.y0,r.x1,r.y0),(r.x1,r.y0,r.x1,r.y1),
+                            (r.x1,r.y1,r.x0,r.y1),(r.x0,r.y1,r.x0,r.y0)]:
+                    _add_line(lines_out, line_seen, *seg, max_lines)
 
-    snaps  = [{"x":v[0],"y":v[1],"t":"ep"} for v in list(ep_grid.values())[:max_snaps//2]]
-    snaps += [{"x":v[0],"y":v[1],"t":"mp"} for v in list(mp_grid.values())[:max_snaps//4]]
-    snaps += [{"x":v[0],"y":v[1],"t":"ct"} for v in list(ct_grid.values())[:max_snaps//4]]
-    return snaps, lines_out[:max_lines]
+    return _pack_snap_result(ep_grid, mp_grid, ct_grid, lines_out, max_snaps, max_lines, meta)
+
+
+def extract_snaps_pdfium(pdf_path: str, page_index: int, max_snaps=MAX_SNAP_POINTS, max_lines=MAX_SNAP_LINES):
+    """
+    Extract snap points และ lines จาก PDF โดยตรงผ่าน PDFium engine
+    เร็วกว่า PyMuPDF 2.6x และแม่นกว่าเพราะอ่าน path object โดยตรง
+
+    Returns:
+        snaps: list of {x, y, t}  t = "ep" | "mp" | "ct"
+        lines: list of [x0, y0, x1, y1]
+    """
+    doc = pdfium.PdfDocument(pdf_path)
+    page = doc[page_index]
+    page_h = page.get_height()
+    rp = page.raw
+
+    ep_grid = {}
+    mp_grid = {}
+    ct_grid = {}
+    lines_out = []
+    line_seen = set()
+    meta = {"engine": "pdfium", "path_objects": 0, "segments": 0, "moveto": 0, "lineto": 0, "bezierto": 0}
+
+    n_obj = pdfium_c.FPDFPage_CountObjects(rp)
+
+    for i in range(n_obj):
+        obj = pdfium_c.FPDFPage_GetObject(rp, i)
+        obj_type = pdfium_c.FPDFPageObj_GetType(obj)
+
+        if obj_type != pdfium_c.FPDF_PAGEOBJ_PATH:
+            continue
+        meta["path_objects"] += 1
+
+        n_seg = pdfium_c.FPDFPath_CountSegments(obj)
+        pts = []
+        prev = None
+        start = None
+
+        for j in range(n_seg):
+            seg = pdfium_c.FPDFPath_GetPathSegment(obj, j)
+            seg_type = pdfium_c.FPDFPathSegment_GetType(seg)
+            x = ctypes.c_float()
+            y = ctypes.c_float()
+            pdfium_c.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+            cx = round(x.value, 1)
+            cy = round(page_h - y.value, 1)
+            pt = (cx, cy)
+            pts.append(pt)
+            meta["segments"] += 1
+            if seg_type == pdfium_c.FPDF_SEGMENT_MOVETO:
+                meta["moveto"] += 1
+                prev = pt
+                start = pt
+                _add_point(ep_grid, cx, cy)
+                continue
+            if seg_type == pdfium_c.FPDF_SEGMENT_LINETO:
+                meta["lineto"] += 1
+            elif seg_type == pdfium_c.FPDF_SEGMENT_BEZIERTO:
+                meta["bezierto"] += 1
+            _add_point(ep_grid, cx, cy)
+            if prev is not None and seg_type in (pdfium_c.FPDF_SEGMENT_LINETO, pdfium_c.FPDF_SEGMENT_BEZIERTO):
+                mx, my = (prev[0] + cx) / 2, (prev[1] + cy) / 2
+                _add_point(mp_grid, mx, my)
+                _add_line(lines_out, line_seen, prev[0], prev[1], cx, cy, max_lines)
+            is_closed = bool(pdfium_c.FPDFPathSegment_GetClose(seg))
+            if is_closed and start is not None:
+                _add_line(lines_out, line_seen, cx, cy, start[0], start[1], max_lines)
+            prev = start if is_closed else pt
+
+        # CT — center of bounding box ของแต่ละ path object
+        if pts:
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            cx2 = (min(xs) + max(xs)) / 2
+            cy2 = (min(ys) + max(ys)) / 2
+            _add_point(ct_grid, cx2, cy2)
+
+    return _pack_snap_result(ep_grid, mp_grid, ct_grid, lines_out, max_snaps, max_lines, meta)
 
 
 def _rotate_snaps(snaps, rot, W, H):
     out = []
     for s in snaps:
         x, y = s["x"], s["y"]
-        if rot == 90:    x, y = H - y, x
+        if rot == 90:    x, y = y, W - x
         elif rot == 180: x, y = W - x, H - y
-        elif rot == 270: x, y = y, W - x
+        elif rot == 270: x, y = H - y, x
         out.append({"x": round(x,1), "y": round(y,1), "t": s["t"]})
     return out
 
@@ -104,11 +338,11 @@ def _rotate_lines(lines, rot, W, H):
     for l in lines:
         x0,y0,x1,y1 = l
         if rot == 90:
-            x0,y0 = H-y0,x0;  x1,y1 = H-y1,x1
+            x0,y0 = y0,W-x0;  x1,y1 = y1,W-x1
         elif rot == 180:
             x0,y0 = W-x0,H-y0; x1,y1 = W-x1,H-y1
         elif rot == 270:
-            x0,y0 = y0,W-x0;  x1,y1 = y1,W-x1
+            x0,y0 = H-y0,x0;  x1,y1 = H-y1,x1
         out.append([round(x0,1),round(y0,1),round(x1,1),round(y1,1)])
     return out
 
@@ -118,56 +352,150 @@ def _rotate_lines(lines, rot, W, H):
 # ══════════════════════════════════════════════════════
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    data = await file.read()
-    tmp  = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    tmp.write(data); tmp.close()
-    doc  = fitz.open(tmp.name)
-    SESSION.clear()
-    SESSION["doc"]        = doc
-    SESSION["path"]       = tmp.name
-    SESSION["page_cache"] = {}
-    return {"pages": len(doc), "name": file.filename}
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    total = 0
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise ValueError("file too large")
+            tmp.write(chunk)
+        tmp.close()
+        if total == 0:
+            raise ValueError("empty upload")
+        try:
+            doc = fitz.open(tmp.name)
+        except Exception:
+            raise ValueError("invalid pdf")
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError("encrypted pdf")
+        case_id = _make_case(doc, tmp.name)
+        return {"pages": len(doc), "name": file.filename, "case_id": case_id,
+                "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024)}
+    except ValueError as exc:
+        tmp.close()
+        _cleanup_file(tmp.name)
+        msg = str(exc)
+        if msg == "file too large":
+            return JSONResponse({"error": "file too large"}, 413)
+        if msg == "empty upload":
+            return JSONResponse({"error": "empty file"}, 400)
+        if msg == "encrypted pdf":
+            return JSONResponse({"error": "encrypted pdf not supported"}, 400)
+        return JSONResponse({"error": "invalid pdf"}, 400)
+    except Exception:
+        tmp.close()
+        _cleanup_file(tmp.name)
+        return JSONResponse({"error": "upload failed"}, 500)
+
+
+@app.get("/sample-pdf")
+def sample_pdf():
+    path = os.path.join(os.path.dirname(__file__), "test_plan_A1.pdf")
+    if not os.path.exists(path):
+        return JSONResponse({"error": "sample pdf not found"}, 404)
+    return FileResponse(path, media_type="application/pdf", filename="test_plan_A1.pdf")
 
 
 @app.get("/page/{n}")
-def get_page(n: int, scale: float = 1.5, rot: int = 0):
-    doc = SESSION.get("doc")
-    if not doc: return JSONResponse({"error":"no file"}, 400)
-    img_cache = SESSION.setdefault("image_cache", {})
-    key = (n, scale, rot)
-    if key not in img_cache:
-        mat = fitz.Matrix(scale, scale).prerotate(rot)
-        pix = doc[n-1].get_pixmap(matrix=mat)
-        img_cache[key] = pix.tobytes("jpeg", jpg_quality=88)
-    return Response(img_cache[key], media_type="image/jpeg")
+def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    render_scale = _normalize_render_scale(scale)
+    if render_scale is None:
+        return JSONResponse({
+            "error": f"scale must be between {MIN_RENDER_SCALE} and {MAX_RENDER_SCALE}"
+        }, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    img_cache = case.setdefault("image_cache", {})
+    key = ("page", n, render_scale, rot)
+    cached = _cache_get(img_cache, key)
+    if cached is None:
+        mat = fitz.Matrix(render_scale, render_scale).prerotate(rot)
+        pix = page.get_pixmap(matrix=mat)
+        cached = _cache_put(
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=88),
+            MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
+        )
+    return Response(cached, media_type="image/jpeg")
 
 
 @app.get("/thumb/{n}")
-def get_thumb(n: int, rot: int = 0):
-    doc = SESSION.get("doc")
-    if not doc: return JSONResponse({"error":"no file"}, 400)
-    mat = fitz.Matrix(0.18, 0.18).prerotate(rot)
-    pix = doc[n-1].get_pixmap(matrix=mat)
-    return StreamingResponse(io.BytesIO(pix.tobytes("jpeg", jpg_quality=70)),
-                             media_type="image/jpeg")
+def get_thumb(n: int, case_id: str, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    img_cache = case.setdefault("image_cache", {})
+    key = ("thumb", n, rot)
+    cached = _cache_get(img_cache, key)
+    if cached is None:
+        mat = fitz.Matrix(0.18, 0.18).prerotate(rot)
+        pix = page.get_pixmap(matrix=mat)
+        cached = _cache_put(
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=70),
+            MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
+        )
+    return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
+
+@app.get("/thumb-md/{n}")
+def get_thumb_md(n: int, case_id: str, rot: int = 0):
+    """Medium thumbnail for setup grid — 0.4x scale, quality 82"""
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    img_cache = case.setdefault("image_cache", {})
+    key = ("thumb-md", n, rot)
+    cached = _cache_get(img_cache, key)
+    if cached is None:
+        mat = fitz.Matrix(0.4, 0.4).prerotate(rot)
+        pix = page.get_pixmap(matrix=mat)
+        cached = _cache_put(
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=82),
+            MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
+        )
+    return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
 
 
 @app.get("/analyse/{n}")
-def analyse(n: int, rot: int = 0):
-    doc = SESSION.get("doc")
-    if not doc: return JSONResponse({"error":"no file"}, 400)
-    cache = SESSION.setdefault("page_cache", {})
+def analyse(n: int, case_id: str, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    cache = case.setdefault("page_cache", {})
     key   = (n, rot)
-    if key in cache:
-        return Response(cache[key], media_type="application/json")
+    cached = _cache_get(cache, key)
+    if cached is not None:
+        return Response(cached, media_type="application/json")
 
-    page   = doc[n-1]
     orig_W = page.rect.width
     orig_H = page.rect.height
 
-    drawings          = page.get_drawings()          # called ONCE
     scale             = detect_scale(page)
-    snaps, lines      = extract_snaps_typed(drawings)
+    snaps, lines, snap_meta = extract_snaps_pdfium(case["path"], n - 1)
+    # fallback to PyMuPDF for scanned/raster PDFs that have no vector objects
+    if not snaps:
+        drawings = page.get_drawings()
+        snaps, lines, snap_meta = extract_snaps_typed(drawings)
+        snap_engine = "pymupdf" if (snaps or lines) else "none"
+    else:
+        snap_engine = "pdfium"
+    snap_meta["engine"] = snap_engine
+    degraded_mode = "raster" if not snaps and not lines else "vector"
+    warning = None
+    if degraded_mode == "raster":
+        warning = "ไม่พบ vector geometry บนหน้านี้: วัดได้แบบ manual เท่านั้น ควรตรวจทานเพิ่ม"
 
     W, H = orig_W, orig_H
     if rot in (90, 180, 270):
@@ -181,10 +509,13 @@ def analyse(n: int, rot: int = 0):
         "orig_w_pt": round(orig_W,1), "orig_h_pt": round(orig_H,1),
     }
     result = {"page":n, "size":size, "scale":scale,
-              "snaps":snaps, "lines":lines, "render_scale":1.5}
+              "snaps":snaps, "lines":lines, "render_scale":1.5,
+              "snap_engine":snap_engine, "degraded_mode": degraded_mode,
+              "snap_meta": snap_meta,
+              "warning": warning}
     # cache pre-serialized JSON bytes — avoids re-serializing on every request
     result_bytes = json.dumps(result, separators=(",",":")).encode()
-    cache[key] = result_bytes
+    _cache_put(cache, key, result_bytes, MAX_ANALYSE_CACHE_ENTRIES, MAX_ANALYSE_CACHE_BYTES)
     return Response(result_bytes, media_type="application/json")
 
 
@@ -194,47 +525,156 @@ def _hex_to_rgb(h: str):
     return tuple(int(h[i:i+2],16)/255 for i in (0,2,4))
 
 
+def _poly_area_pt2(pts: list[dict]) -> float:
+    if len(pts) < 3:
+        return 0.0
+    area = 0.0
+    for i, p1 in enumerate(pts):
+        p2 = pts[(i + 1) % len(pts)]
+        area += p1["x"] * p2["y"] - p2["x"] * p1["y"]
+    return abs(area) / 2.0
+
+
+def _line_points(obj: dict) -> list[dict]:
+    pts = obj.get("pts")
+    if isinstance(pts, list) and len(pts) >= 2:
+        return pts
+    if all(k in obj for k in ("x0", "y0", "x1", "y1")):
+        return [{"x": obj["x0"], "y": obj["y0"]}, {"x": obj["x1"], "y": obj["y1"]}]
+    return []
+
+
+def _line_length_pt(pts: list[dict]) -> float:
+    total = 0.0
+    for p1, p2 in zip(pts, pts[1:]):
+        total += math.hypot(p2["x"] - p1["x"], p2["y"] - p1["y"])
+    return total
+
+
+def _nearest_on_segment(px, py, ax, ay, bx, by):
+    dx = bx - ax
+    dy = by - ay
+    denom = dx * dx + dy * dy
+    if denom <= 1e-9:
+        return ax, ay, math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / denom))
+    x = ax + t * dx
+    y = ay + t * dy
+    return x, y, math.hypot(px - x, py - y)
+
+
+def _object_points_for_ref_report(kind: str, obj: dict) -> list[tuple[float, float, str]]:
+    if kind == "parking":
+        return [(obj.get("x", 0), obj.get("y", 0), "marker")]
+    if kind in ("line", "ref"):
+        return [(p["x"], p["y"], f"จุด {i+1}") for i, p in enumerate(_line_points(obj))]
+    pts = obj.get("pts") or []
+    out = [(p["x"], p["y"], f"มุม {i+1}") for i, p in enumerate(pts)]
+    if pts:
+        out.append((sum(p["x"] for p in pts) / len(pts), sum(p["y"] for p in pts) / len(pts), "กึ่งกลาง"))
+    return out
+
+
+def _distance_to_ref(pt, ref: dict):
+    best = None
+    for p1, p2 in zip(_line_points(ref), _line_points(ref)[1:]):
+        x, y, d = _nearest_on_segment(pt[0], pt[1], p1["x"], p1["y"], p2["x"], p2["y"])
+        if best is None or d < best["dist_pt"]:
+            best = {"x": x, "y": y, "dist_pt": d, "point_role": pt[2]}
+    return best
+
+
 @app.post("/export-pdf")
 async def export_pdf(body: dict):
-    doc = SESSION.get("doc")
-    if not doc: return JSONResponse({"error":"no file"}, 400)
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
     pages   = body.get("pages", [])
-    annots  = body.get("annotations", {})   # {str(page): {lines, polys}}
+    annots  = body.get("annotations", {})
     rotations = body.get("rotations", {})
     pdf_name  = body.get("pdfName", "export")
+
+    def _rot_pt(x, y, rot, W, H):
+        if rot == 0:   return x, y
+        if rot == 90:  return y, W - x
+        if rot == 180: return W - x, H - y
+        return H - y, x
 
     new_doc = fitz.open()
     for pg_num in pages:
         idx = pg_num - 1
         if idx < 0 or idx >= len(doc): continue
+        orig_page = doc[idx]
+        orig_W, orig_H = orig_page.rect.width, orig_page.rect.height
         new_doc.insert_pdf(doc, from_page=idx, to_page=idx)
         page = new_doc[len(new_doc)-1]
+        rot = int(rotations.get(str(pg_num), rotations.get(pg_num, 0)) or 0)
+        if rot in (90, 180, 270):
+            page.set_rotation(rot)
         pg_annots = annots.get(str(pg_num), {})
 
         for ln in pg_annots.get("lines", []):
             try:
                 col = _hex_to_rgb(ln.get("color","#ffd60a"))
-                p1  = fitz.Point(ln["x0"], ln["y0"])
-                p2  = fitz.Point(ln["x1"], ln["y1"])
-                page.draw_line(p1, p2, color=col, width=1.5, dashes="[6 3]")
-                lbl = f"{ln['dist']:.2f} m" if ln.get("dist") else f"{ln['ptDist']:.1f} pt"
-                page.insert_text(fitz.Point((ln["x0"]+ln["x1"])/2,
-                                            (ln["y0"]+ln["y1"])/2-5),
-                                 lbl, fontsize=7, color=col)
+                raw_pts = _line_points(ln)
+                if len(raw_pts) < 2:
+                    continue
+                pts = [fitz.Point(*_rot_pt(p["x"], p["y"], rot, orig_W, orig_H)) for p in raw_pts]
+                page.draw_polyline(pts, color=col, width=1.5, dashes="[6 3]")
+                pt_dist = ln.get("ptDist") or _line_length_pt(raw_pts)
+                lbl = f"{ln['dist']:.2f} m" if ln.get("dist") else f"{pt_dist:.1f} pt"
+                mid = raw_pts[len(raw_pts) // 2]
+                mx, my = _rot_pt(mid["x"], mid["y"] - 5, rot, orig_W, orig_H)
+                page.insert_text(fitz.Point(mx, my), lbl, fontsize=7, color=col)
+            except Exception: pass
+
+        for ref in pg_annots.get("refs", []):
+            try:
+                col = _hex_to_rgb(ref.get("color", "#5ac8fa"))
+                raw_pts = _line_points(ref)
+                if len(raw_pts) < 2:
+                    continue
+                pts = [fitz.Point(*_rot_pt(p["x"], p["y"], rot, orig_W, orig_H)) for p in raw_pts]
+                page.draw_polyline(pts, color=col, width=1.2, dashes="[8 4]")
+                mid = raw_pts[len(raw_pts) // 2]
+                label = ref.get("name") or ref.get("refType") or "reference"
+                mx, my = _rot_pt(mid["x"], mid["y"] - 5, rot, orig_W, orig_H)
+                page.insert_text(fitz.Point(mx, my), label, fontsize=7, color=col)
+            except Exception: pass
+
+        for park in pg_annots.get("parking", []):
+            try:
+                col = _hex_to_rgb(park.get("color", "#ffcc00"))
+                x, y = _rot_pt(park["x"], park["y"], rot, orig_W, orig_H)
+                rect = fitz.Rect(x - 3, y - 3, x + 3, y + 3)
+                page.draw_rect(rect, color=col, fill=col, width=0.8)
+                page.insert_text(fitz.Point(x + 4, y + 3), "P", fontsize=7, color=col)
             except Exception: pass
 
         for poly in pg_annots.get("polys", []):
             if not poly.get("closed"): continue
             try:
                 col  = _hex_to_rgb(poly.get("color","#30d158"))
-                pts  = [fitz.Point(p["x"],p["y"]) for p in poly["pts"]]
-                page.draw_polygon(pts, color=col, fill=col, fill_opacity=0.08, width=1.5)
-                cx   = sum(p["x"] for p in poly["pts"])/len(poly["pts"])
-                cy   = sum(p["y"] for p in poly["pts"])/len(poly["pts"])
+                rpts = [_rot_pt(p["x"], p["y"], rot, orig_W, orig_H) for p in poly["pts"]]
+                pts  = [fitz.Point(x, y) for x, y in rpts]
+                page.draw_polyline(
+                    pts,
+                    color=col,
+                    fill=col,
+                    fill_opacity=0.08,
+                    width=1.5,
+                    closePath=True,
+                )
+                cx   = sum(x for x, _ in rpts) / len(rpts)
+                cy   = sum(y for _, y in rpts) / len(rpts)
                 rows = []
                 if poly.get("name"):  rows.append(poly["name"])
-                if poly.get("area"):  rows.append(f"{poly['area']:.2f} sq.m")
-                for i,t in enumerate(rows):
+                area = poly.get("area")
+                if area is None and poly.get("pts"):
+                    area_pt2 = _poly_area_pt2(poly["pts"])
+                    area = area_pt2 / (poly.get("scale_pts_per_m", 1) ** 2) if poly.get("scale_pts_per_m") else None
+                if area: rows.append(f"{area:.2f} sq.m")
+                for i, t in enumerate(rows):
                     page.insert_text(fitz.Point(cx, cy+i*9-4), t, fontsize=7, color=col)
             except Exception: pass
 
@@ -250,1318 +690,537 @@ async def export_pdf(body: dict):
 # ══════════════════════════════════════════════════════
 # Frontend
 # ══════════════════════════════════════════════════════
-HTML = r"""<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PDF Scale</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,sans-serif;background:#1c1c1e;color:#e5e5e7;
-     height:100vh;display:flex;flex-direction:column;overflow:hidden}
-#topbar{background:#2c2c2e;padding:6px 12px;display:flex;align-items:center;
-        gap:6px;border-bottom:1px solid #3a3a3c;flex-shrink:0;flex-wrap:wrap}
-#topbar h1{font-size:13px;font-weight:700;white-space:nowrap}
-#upload-btn{background:#0a84ff;color:#fff;border:none;border-radius:7px;
-            padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer}
-#upload-btn:hover{background:#0071e3}
-#file-input{display:none}
-.sep{width:1px;height:22px;background:#3a3a3c;flex-shrink:0}
-.tb-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
-        color:#e5e5e7;border-radius:7px;padding:4px 10px;font-size:12px;
-        cursor:pointer;white-space:nowrap}
-.tb-btn:hover{background:rgba(255,255,255,.14)}
-.tb-btn.active{background:#0a84ff;border-color:#0a84ff;color:#fff}
-.tb-btn.danger{background:rgba(255,59,48,.15);border-color:rgba(255,59,48,.3);color:#ff453a}
-.tb-btn.danger:hover{background:rgba(255,59,48,.28)}
-/* snap toggles */
-#snap-bar{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
-#snap-bar span{font-size:11px;color:#636366;margin-right:2px}
-.sn-btn{border:1px solid rgba(255,255,255,.12);border-radius:20px;
-        padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;
-        background:rgba(255,255,255,.05);color:#636366;transition:all .15s}
-.sn-btn:hover{background:rgba(255,255,255,.1)}
-.sn-btn.on{color:#fff}
-.sn-ep.on{background:#ffd60a33;border-color:#ffd60a;color:#ffd60a}
-.sn-mp.on{background:#ff950033;border-color:#ff9500;color:#ff9500}
-.sn-ct.on{background:#0a84ff33;border-color:#0a84ff;color:#0a84ff}
-.sn-nl.on{background:#30d15833;border-color:#30d158;color:#30d158}
-.sn-ix.on{background:#ff453a33;border-color:#ff453a;color:#ff453a}
-.sn-off.on{background:#48484a;border-color:#636366;color:#e5e5e7}
-#scale-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;
-             background:rgba(255,69,58,.2);color:#ff453a;border:1px solid rgba(255,69,58,.3)}
-#scale-badge.ok{background:rgba(48,209,88,.15);color:#30d158;border-color:rgba(48,209,88,.3)}
-#status{font-size:11px;color:#98989f;overflow:hidden;text-overflow:ellipsis;
-        max-width:240px;white-space:nowrap}
-#body{display:flex;flex:1;overflow:hidden}
-#thumb-strip{width:130px;min-width:130px;background:#2c2c2e;
-             border-right:1px solid #3a3a3c;overflow-y:auto;flex-shrink:0}
-#thumb-strip::-webkit-scrollbar{width:4px}
-#thumb-strip::-webkit-scrollbar-thumb{background:#48484a;border-radius:2px}
-.thumb-item{padding:6px;cursor:pointer;border-bottom:1px solid #3a3a3c;
-            display:flex;flex-direction:column;align-items:center;gap:3px}
-.thumb-item:hover{background:rgba(255,255,255,.06)}
-.thumb-item.active{background:rgba(10,132,255,.2);border-left:3px solid #0a84ff}
-.thumb-item img{width:100%;border-radius:3px;background:#333}
-.thumb-item span{font-size:10px;color:#98989f}
-.thumb-item.active span{color:#e5e5e7}
-.thumb-scale{font-size:9px;color:#30d158;font-weight:600}
-.thumb-scale.none{color:#ff453a}
-.thumb-dot{font-size:9px;color:#0a84ff}
-#workspace{flex:1;overflow:hidden;position:relative;background:#111;cursor:grab}
-#workspace.drawing{cursor:crosshair}
-#cc{position:absolute;top:0;left:0;transform-origin:0 0}
-canvas{display:block}
-#infobar{background:#2c2c2e;border-top:1px solid #3a3a3c;padding:5px 14px;
-         font-size:11px;display:flex;gap:16px;align-items:center;flex-shrink:0}
-#infobar span{color:#98989f}#infobar b{color:#e5e5e7}
-#measure-result{color:#ffd60a;font-weight:600;margin-left:auto}
-/* snap cursor */
-#snap-cur{position:fixed;width:14px;height:14px;border:2px solid #ffd60a;
-          border-radius:50%;transform:translate(-50%,-50%);
-          pointer-events:none;display:none;z-index:200;
-          box-shadow:0 0 6px rgba(255,214,10,.5);transition:border-color .1s}
-#snap-lbl{position:fixed;font-size:9px;font-weight:700;
-          pointer-events:none;display:none;z-index:201;
-          background:rgba(0,0,0,.7);padding:1px 4px;border-radius:3px}
-/* panels */
-.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-       background:#2c2c2e;border:1px solid #48484a;border-radius:12px;
-       padding:20px 24px;z-index:500;display:none;min-width:280px;
-       box-shadow:0 8px 32px rgba(0,0,0,.6)}
-.panel h3{font-size:13px;margin-bottom:12px}
-.panel label{font-size:12px;color:#98989f;display:block;margin-bottom:6px}
-.panel-input{width:100%;background:#1c1c1e;border:1px solid #48484a;border-radius:7px;
-             color:#e5e5e7;font-size:14px;padding:7px 10px;outline:none;margin-bottom:14px}
-.panel-input:focus{border-color:#0a84ff}
-.panel-row{display:flex;gap:8px}
-.btn-ok{flex:1;background:#0a84ff;color:#fff;border:none;border-radius:7px;
-        padding:7px;font-size:12px;font-weight:600;cursor:pointer}
-.btn-ok:hover{background:#0071e3}
-.btn-cancel{background:rgba(255,255,255,.08);color:#e5e5e7;
-            border:1px solid rgba(255,255,255,.1);border-radius:7px;
-            padding:7px 14px;font-size:12px;cursor:pointer}
-/* context menu */
-#ctx-menu{position:fixed;background:#2c2c2e;border:1px solid #48484a;
-          border-radius:9px;z-index:600;display:none;min-width:180px;
-          box-shadow:0 4px 20px rgba(0,0,0,.6);overflow:hidden}
-.ctx-item{padding:9px 14px;font-size:12px;cursor:pointer;color:#e5e5e7}
-.ctx-item:hover{background:rgba(255,255,255,.1)}
-.ctx-item.del{color:#ff453a}
-.ctx-sep{height:1px;background:#3a3a3c}
-.ctx-color-row{padding:7px 14px;display:flex;align-items:center;gap:6px}
-.ctx-color-row span{font-size:11px;color:#98989f;white-space:nowrap}
-#ctx-inp-color{width:26px;height:22px;border:none;padding:0;cursor:pointer;
-               border-radius:4px;background:none;flex-shrink:0}
-#ctx-inp-opacity{width:56px;accent-color:#0a84ff;cursor:pointer}
-#ctx-opacity-val{font-size:11px;color:#e5e5e7;min-width:28px}
-/* inline color controls */
-#color-bar{display:flex;align-items:center;gap:6px}
-#color-bar span{font-size:11px;color:#636366;white-space:nowrap}
-#inp-color{width:28px;height:26px;border:none;padding:0;cursor:pointer;
-           border-radius:5px;background:none;overflow:hidden;flex-shrink:0}
-#inp-opacity{width:64px;accent-color:#0a84ff;cursor:pointer}
-#opacity-val{font-size:11px;color:#e5e5e7;min-width:28px}
-/* zoom controls */
-#zoom-bar{display:flex;align-items:center;gap:4px}
-#zoom-val{font-size:11px;color:#e5e5e7;min-width:36px;text-align:center}
-/* area type in name panel */
-.atype-row{display:flex;gap:8px;margin-bottom:14px}
-.atype-btn{flex:1;padding:6px 4px;font-size:12px;font-weight:600;cursor:pointer;
-           border-radius:7px;border:1px solid rgba(255,255,255,.1);
-           background:rgba(255,255,255,.05);color:#98989f;text-align:center}
-.atype-btn.sel{background:rgba(10,132,255,.18);border-color:#0a84ff;color:#0a84ff}
-/* page manager modal */
-#pgmgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:700;display:none;
-               align-items:center;justify-content:center}
-#pgmgr-overlay.open{display:flex}
-#pgmgr-box{background:#2c2c2e;border:1px solid #48484a;border-radius:14px;
-           padding:20px;width:min(90vw,820px);max-height:85vh;display:flex;
-           flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7)}
-#pgmgr-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#pgmgr-header h3{font-size:13px;font-weight:700;flex:1}
-#pgmgr-sel-info{font-size:11px;color:#98989f;min-width:80px}
-.pgmgr-hbtn{padding:5px 12px;font-size:11px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e5e5e7}
-.pgmgr-hbtn:hover{background:rgba(255,255,255,.13)}
-.pgmgr-hbtn.primary{background:#0a84ff;border-color:#0a84ff;color:#fff}
-.pgmgr-hbtn.primary:hover{background:#0071e3}
-.pgmgr-hbtn.danger{color:#ff453a;border-color:rgba(255,69,58,.3)}
-#pgmgr-grid{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding:4px 2px;flex:1}
-.pgmgr-cell{width:90px;cursor:pointer;border-radius:8px;border:2px solid transparent;
-            padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;
-            background:rgba(255,255,255,.04);transition:border-color .15s,background .15s;
-            user-select:none}
-.pgmgr-cell:hover{background:rgba(255,255,255,.08)}
-.pgmgr-cell.sel{border-color:#0a84ff;background:rgba(10,132,255,.15)}
-.pgmgr-cell img{width:100%;border-radius:4px;background:#333;pointer-events:none}
-.pgmgr-cell span{font-size:10px;color:#98989f}
-.pgmgr-cell.sel span{color:#e5e5e7}
-.pgmgr-footer{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #3a3a3c}
-</style>
-</head>
-<body>
-<div id="topbar">
-  <h1>📐 PDF Scale</h1>
-  <label id="upload-btn">📂 เปิด PDF<input id="file-input" type="file" accept=".pdf"></label>
-  <div class="sep"></div>
-  <button class="tb-btn" id="btn-prev" onclick="if(curPage>1)loadPage(curPage-1)" title="หน้าก่อน (←)">◀</button>
-  <span id="page-lbl" style="font-size:11px;color:#e5e5e7;min-width:48px;text-align:center">— / —</span>
-  <button class="tb-btn" id="btn-next" onclick="if(curPage<totalPages)loadPage(curPage+1)" title="หน้าถัดไป (→)">▶</button>
-  <div class="sep"></div>
-  <button class="tb-btn active" id="btn-pan"   onclick="setMode('pan')">✋ Pan</button>
-  <button class="tb-btn"        id="btn-sel"   onclick="setMode('sel')">↖ เลือก</button>
-  <button class="tb-btn"        id="btn-dist"  onclick="setMode('dist')">📏 ระยะ</button>
-  <button class="tb-btn"        id="btn-area"  onclick="setMode('area')">⬡ พื้นที่</button>
-  <button class="tb-btn"        id="btn-calib" onclick="setMode('calib')">📐 สอบเทียบ</button>
-  <button class="tb-btn danger" onclick="clearMeasures()">🗑</button>
-  <div class="sep"></div>
-  <div id="color-bar">
-    <span>สี</span>
-    <input type="color" id="inp-color" value="#30d158" oninput="applyColor(this.value)" title="สี">
-    <input type="range" id="inp-opacity" min="10" max="100" value="85" oninput="applyOpacity(+this.value)" title="ความโปร่ง">
-    <span id="opacity-val">85%</span>
-  </div>
-  <div class="sep"></div>
-  <div id="zoom-bar">
-    <button class="tb-btn" onclick="adjustZoom(1.3)" title="ซูมเข้า">+</button>
-    <span id="zoom-val">100%</span>
-    <button class="tb-btn" onclick="adjustZoom(1/1.3)" title="ซูมออก">−</button>
-    <button class="tb-btn" onclick="fitToWindow()" title="Fit">⊞</button>
-  </div>
-  <div class="sep"></div>
-  <button class="tb-btn" onclick="rotatePage(-90)">↺</button>
-  <button class="tb-btn" onclick="rotatePage(90)">↻</button>
-  <span id="rot-badge" style="font-size:11px;color:#98989f;display:none"></span>
-  <div class="sep"></div>
-  <div id="snap-bar">
-    <span>Snap:</span>
-    <button class="sn-btn sn-ep on"  id="sn-ep"  onclick="toggleSnap('ep')">EP</button>
-    <button class="sn-btn sn-mp on"  id="sn-mp"  onclick="toggleSnap('mp')">MP</button>
-    <button class="sn-btn sn-ct on"  id="sn-ct"  onclick="toggleSnap('ct')">CT</button>
-    <button class="sn-btn sn-nl"     id="sn-nl"  onclick="toggleSnap('nl')">NL</button>
-    <button class="sn-btn sn-ix"     id="sn-ix"  onclick="toggleSnap('ix')">IX</button>
-    <button class="sn-btn sn-off"    id="sn-off" onclick="toggleSnap('off')">—</button>
-  </div>
-  <div class="sep"></div>
-  <span id="scale-badge">ยังไม่มีไฟล์</span>
-  <div class="sep"></div>
-  <button class="tb-btn" onclick="exportCSV()">⬇ CSV</button>
-  <button class="tb-btn" onclick="exportJSON()">⬇ JSON</button>
-  <div class="sep"></div>
-  <button class="tb-btn" id="btn-undo" onclick="undo()" title="Undo (Ctrl+Z)">↩ Undo</button>
-  <button class="tb-btn" onclick="openPageManager()" title="จัดการหน้า / บันทึก PDF">📄 หน้า</button>
-  <button class="tb-btn" onclick="saveProject()" title="บันทึกโปรเจกต์ (.bmaplan)">💾 บันทึก</button>
-  <label class="tb-btn" style="cursor:pointer" title="โหลดโปรเจกต์ (.bmaplan)">📂 โหลด<input id="proj-input" type="file" accept=".bmaplan" style="display:none"></label>
-  <span id="status" style="margin-left:4px"></span>
-</div>
-<div id="body">
-  <div id="thumb-strip"></div>
-  <div id="workspace">
-    <div id="cc"><canvas id="canvas"></canvas></div>
-  </div>
-</div>
-<div id="infobar">
-  <span>Mode: <b id="lbl-mode">Pan</b></span>
-  <span>Scale: <b id="lbl-scale">—</b></span>
-  <span>Snap: <b id="lbl-snaps">—</b></span>
-  <span id="measure-result"></span>
-</div>
-<div id="snap-cur"></div>
-<div id="snap-lbl"></div>
+@app.post("/project")
+async def save_project(body: dict):
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    case["page_tags"] = body.get("page_tags", {})
+    case["project_info"] = body.get("project_info", {})
+    return {"ok": True}
 
-<div id="calib-panel" class="panel">
-  <h3>📐 สอบเทียบสเกล</h3>
-  <div id="calib-line-info" style="font-size:11px;color:#98989f;margin-bottom:14px">คลิก 2 จุด บนเส้นที่ทราบระยะจริง</div>
-  <label>ระยะจริงระหว่าง 2 จุด (เมตร)</label>
-  <input id="calib-input" class="panel-input" type="number" step="0.01" min="0.01" placeholder="เช่น 7.71">
-  <div class="panel-row">
-    <button class="btn-ok" onclick="finishCalib()">ยืนยัน</button>
-    <button class="btn-cancel" onclick="cancelCalib()">ยกเลิก</button>
-  </div>
-</div>
-
-<div id="name-panel" class="panel">
-  <h3 id="name-panel-title">ชื่อพื้นที่</h3>
-  <div class="atype-row" id="atype-row" style="display:none">
-    <button class="atype-btn sel" id="atype-room" onclick="setAType('room')">🏠 ห้อง/อาคาร</button>
-    <button class="atype-btn"    id="atype-land" onclick="setAType('land')">🌿 ที่ดิน</button>
-  </div>
-  <label>ชื่อพื้นที่ / ห้อง</label>
-  <input id="name-input" class="panel-input" type="text" placeholder="เช่น ห้องนอน 1">
-  <div class="panel-row">
-    <button class="btn-ok" onclick="finishName()">ตกลง</button>
-    <button class="btn-cancel" onclick="cancelName()">ข้าม</button>
-  </div>
-</div>
-
-<div id="ctx-menu">
-  <div class="ctx-color-row">
-    <span>สี</span>
-    <input type="color" id="ctx-inp-color" oninput="ctxColor(this.value)" title="เปลี่ยนสี">
-    <input type="range" id="ctx-inp-opacity" min="10" max="100" value="85" oninput="ctxOpacity(+this.value)" title="ความโปร่ง">
-    <span id="ctx-opacity-val">85%</span>
-  </div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item" id="ctx-rename" onclick="ctxRename()">✏️ เปลี่ยนชื่อ</div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item del" onclick="ctxDelete()">🗑 ลบ</div>
-</div>
-
-<!-- page manager overlay -->
-<div id="pgmgr-overlay" onclick="if(event.target===this)closePgMgr()">
-  <div id="pgmgr-box" onclick="event.stopPropagation()">
-    <div id="pgmgr-header">
-      <h3>📄 จัดการหน้า</h3>
-      <span id="pgmgr-sel-info">เลือก 0 หน้า</span>
-      <button class="pgmgr-hbtn" onclick="pgmgrSelectAll()">เลือกทั้งหมด</button>
-      <button class="pgmgr-hbtn" onclick="pgmgrClearAll()">ยกเลิก</button>
-      <button class="pgmgr-hbtn danger" onclick="closePgMgr()">✕</button>
-    </div>
-    <div id="pgmgr-grid"></div>
-    <div class="pgmgr-footer">
-      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(false)">⬇ Save PDF (หน้าที่เลือก)</button>
-      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(true)">⬇ PDF + annotations</button>
-      <button class="pgmgr-hbtn" onclick="saveProject()">💾 บันทึกโปรเจกต์</button>
-    </div>
-  </div>
-</div>
-
-<script>
-// ── state ──────────────────────────────────────────────
-let totalPages=0, curPage=1, pageData=null;
-const RS=1.5;
-let zoom=1, panX=0, panY=0, mode="pan";
-let mPts=[];           // in-progress — PDF pt (unrotated)
-let mLines=[], mPolys=[];
-let isPan=false, lastMx=0, lastMy=0;
-let bgImg=null, snapTarget=null, snapTargetType=null;
-let calibPts=[];       // canvas px
-let pageRotations={};
-let pageStore={};      // {page: {lines,polys,calibScale}}
-let analyseCache={};
-let nameCb=null;
-let ctxTarget=null;
-let snapModes={ep:true,mp:true,ct:true,nl:false,ix:false,off:false};
-let curColor="#30d158", curOpacity=0.85, curAType="room";
-let selItem=null;    // {type:'line'|'poly', idx}
-let dragState=null;  // {type, idx, startPdf, origData}
-let undoStack=[];
-let spaceDown=false, preSpaceMode="pan";
-let currentFileName="";
-let pgmgrSel=new Set();   // selected page numbers in page manager
-let pgmgrLastClick=null;
-
-const canvas    = document.getElementById("canvas");
-const ctx       = canvas.getContext("2d");
-const ws        = document.getElementById("workspace");
-const cc        = document.getElementById("cc");
-const snapCur   = document.getElementById("snap-cur");
-const snapLbl   = document.getElementById("snap-lbl");
-const ctxMenu   = document.getElementById("ctx-menu");
-const namePanel = document.getElementById("name-panel");
-const calibPanel= document.getElementById("calib-panel");
-
-// snap type config
-const SNAP_COLORS={ep:"#ffd60a",mp:"#ff9500",ct:"#5ac8fa",nl:"#30d158",ix:"#ff453a"};
-const SNAP_LABELS={ep:"EP",mp:"MP",ct:"CT",nl:"NL",ix:"IX"};
-
-// ── inline color controls ──────────────────────────────
-function applyColor(c){
-  curColor=c;
-  // if item selected → update it live
-  if(selItem){
-    if(selItem.type==="line"&&mLines[selItem.idx]) mLines[selItem.idx].color=c;
-    if(selItem.type==="poly"&&mPolys[selItem.idx]) mPolys[selItem.idx].color=c;
-    redraw();
-  }
-}
-function applyOpacity(v){
-  curOpacity=v/100;
-  document.getElementById("opacity-val").textContent=v+"%";
-  if(selItem){
-    if(selItem.type==="line"&&mLines[selItem.idx]) mLines[selItem.idx].opacity=curOpacity;
-    if(selItem.type==="poly"&&mPolys[selItem.idx]) mPolys[selItem.idx].opacity=curOpacity;
-    redraw();
-  }
-}
-function syncColorBar(item){
-  // update color bar to reflect selected item's color/opacity
-  const obj=item?.type==="line"?mLines[item.idx]:item?.type==="poly"?mPolys[item.idx]:null;
-  if(obj){
-    const c=obj.color||curColor, o=Math.round((obj.opacity??curOpacity)*100);
-    document.getElementById("inp-color").value=c.length===7?c:"#30d158";
-    document.getElementById("inp-opacity").value=o;
-    document.getElementById("opacity-val").textContent=o+"%";
-  }
-}
-function hexAlpha(hex,a){
-  const r=parseInt(hex.slice(1,3),16)||0;
-  const g=parseInt(hex.slice(3,5),16)||0;
-  const b=parseInt(hex.slice(5,7),16)||0;
-  return`rgba(${r},${g},${b},${a})`;
-}
-document.addEventListener("click",()=>ctxMenu.style.display="none");
-
-// ── undo ───────────────────────────────────────────────
-function pushUndo(){
-  undoStack.push({
-    lines:JSON.parse(JSON.stringify(mLines)),
-    polys:JSON.parse(JSON.stringify(mPolys))
-  });
-  if(undoStack.length>60)undoStack.shift();
-}
-function undo(){
-  if(!undoStack.length){setStatus("ไม่มีอะไรให้ Undo");return;}
-  const s=undoStack.pop();
-  mLines=s.lines; mPolys=s.polys;
-  saveCurrentPage(); redraw(); setStatus("↩ Undo");
-}
-
-// ── zoom buttons ───────────────────────────────────────
-function adjustZoom(factor){
-  const W=ws.clientWidth,H=ws.clientHeight;
-  const fx=W/2,fy=H/2;
-  const nz=Math.max(0.08,Math.min(8,zoom*factor));
-  panX=fx-(fx-panX)*(nz/zoom); panY=fy-(fy-panY)*(nz/zoom); zoom=nz; applyT();
-  document.getElementById("zoom-val").textContent=Math.round(zoom*100)+"%";
-}
-
-// ── area type ──────────────────────────────────────────
-function setAType(t){
-  curAType=t;
-  document.getElementById("atype-room").classList.toggle("sel",t==="room");
-  document.getElementById("atype-land").classList.toggle("sel",t==="land");
-}
-
-// ── snap toggles ───────────────────────────────────────
-function toggleSnap(t){
-  if(t==="off"){
-    snapModes.off=!snapModes.off;
-  }else{
-    snapModes[t]=!snapModes[t];
-    if(snapModes[t]) snapModes.off=false;
-  }
-  updateSnapUI();
-}
-function updateSnapUI(){
-  ["ep","mp","ct","nl","ix","off"].forEach(t=>{
-    document.getElementById("sn-"+t).classList.toggle("on", snapModes[t]);
-  });
-  // auto-load lines if NL or IX just enabled
-  if((snapModes.nl||snapModes.ix)&&pageData&&!pageData.lines?.length){
-    fetchAnalyse(curPage,true);
-  }
-}
-
-// ── coordinate transforms ──────────────────────────────
-function origSize(){
-  if(pageData?.size?.orig_w_pt)
-    return{W:pageData.size.orig_w_pt, H:pageData.size.orig_h_pt};
-  return{W:canvas.width/RS, H:canvas.height/RS};
-}
-function pdfToC(px,py){
-  const {W,H}=origSize(), rot=getRot(curPage);
-  if(rot===0)   return{x:px*RS,       y:py*RS};
-  if(rot===90)  return{x:(H-py)*RS,   y:px*RS};
-  if(rot===180) return{x:(W-px)*RS,   y:(H-py)*RS};
-               return{x:py*RS,       y:(W-px)*RS};
-}
-function cToPdf(cx,cy){
-  const {W,H}=origSize(), rot=getRot(curPage);
-  if(rot===0)   return{x:cx/RS,       y:cy/RS};
-  if(rot===90)  return{x:cy/RS,       y:H-cx/RS};
-  if(rot===180) return{x:W-cx/RS,     y:H-cy/RS};
-               return{x:W-cy/RS,     y:cx/RS};
-}
-
-// ── per-page store ─────────────────────────────────────
-function getStore(n){
-  if(!pageStore[n]) pageStore[n]={lines:[],polys:[],calibScale:null};
-  return pageStore[n];
-}
-function saveCurrentPage(){
-  const s=getStore(curPage);
-  s.lines=[...mLines]; s.polys=[...mPolys];
-  if(pageData?.scale?.calibrated) s.calibScale=pageData.scale;
-}
-function restorePage(n){
-  const s=getStore(n);
-  mLines=[...s.lines]; mPolys=[...s.polys];
-  if(s.calibScale&&analyseCache[n]) analyseCache[n].scale=s.calibScale;
-}
-
-// ── rotation ───────────────────────────────────────────
-function getRot(n){return pageRotations[n]||0;}
-function rotatePage(delta){
-  saveCurrentPage();
-  const r=(getRot(curPage)+delta+360)%360;
-  pageRotations[curPage]=r;
-  const b=document.getElementById("rot-badge");
-  b.style.display=r?"inline":"none"; b.textContent=r+"°";
-  reloadPageImage();
-}
-function reloadPageImage(){
-  const rot=getRot(curPage);
-  const img=new Image();
-  img.onload=()=>{bgImg=img;canvas.width=img.width;canvas.height=img.height;fitToWindow();redraw();};
-  img.src=`/page/${curPage}?scale=${RS}&rot=${rot}&t=${Date.now()}`;
-  fetchAnalyse(curPage);
-}
-function fetchAnalyse(n, forceLines=false){
-  const rot=getRot(n);
-  fetch(`/analyse/${n}?rot=${rot}`).then(r=>r.json()).then(d=>{
-    if(pageStore[n]?.calibScale) d.scale=pageStore[n].calibScale;
-    analyseCache[n]=d;
-    if(n===curPage){pageData=d;updateAnalyseUI(d);}
-    const ts=document.getElementById("ts-"+n);
-    if(ts){
-      if(d.scale){ts.textContent=d.scale.label;ts.className="thumb-scale";}
-      else{ts.textContent="no scale";ts.className="thumb-scale none";}
+@app.get("/project")
+def get_project(case_id: str):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    return {
+        "page_tags": case.get("page_tags", {}),
+        "project_info": case.get("project_info", {})
     }
-    setStatus((d.scale?.label??"ไม่พบ scale")+" · "+
-              (d.snaps?.length||0)+" pts · "+
-              (d.lines?.length||0)+" segs");
-  });
-}
-function updateAnalyseUI(d){
-  const badge=document.getElementById("scale-badge");
-  const lblS=document.getElementById("lbl-scale");
-  if(d.scale){badge.className="ok";badge.textContent=d.scale.label;lblS.textContent=d.scale.label;}
-  else{badge.className="";badge.textContent="ไม่พบ scale";lblS.textContent="—";}
-  document.getElementById("lbl-snaps").textContent=(d.snaps?.length||0)+" pts";
-  redraw();
+
+
+TAG_LABELS = {
+    "site": "ผังบริเวณ",
+    "plan": "ชั้น",
+    "elev": "รูปด้าน",
+    "section": "รูปตัด",
+    "detail": "รายละเอียด",
+    "schedule": "ตาราง",
+    "other": "อื่น ๆ",
 }
 
-// ── upload ─────────────────────────────────────────────
-document.getElementById("file-input").addEventListener("change",async e=>{
-  const file=e.target.files[0]; if(!file)return;
-  setStatus("กำลังโหลด…");
-  pageStore={};analyseCache={};pageRotations={};
-  const fd=new FormData();fd.append("file",file);
-  const res=await fetch("/upload",{method:"POST",body:fd});
-  const d=await res.json();
-  totalPages=d.pages; currentFileName=file.name;
-  buildThumbs(totalPages);
-  await loadPage(1);
-});
+AREA_SEMANTIC_TAGS = {"gross_floor_area", "floor_area", "use_area"}
 
-// ── thumbs ─────────────────────────────────────────────
-function buildThumbs(n){
-  const strip=document.getElementById("thumb-strip");strip.innerHTML="";
-  for(let i=1;i<=n;i++){
-    const div=document.createElement("div");
-    div.className="thumb-item";div.id="th-"+i;
-    div.innerHTML=`<img src="/thumb/${i}" loading="lazy"><span>หน้า ${i}</span><span class="thumb-scale none" id="ts-${i}">…</span><span class="thumb-dot" id="td-${i}"></span>`;
-    div.addEventListener("click",()=>loadPage(i));
-    strip.appendChild(div);
-  }
-}
-function setThumbActive(n){
-  document.querySelectorAll(".thumb-item").forEach(e=>e.classList.remove("active"));
-  const el=document.getElementById("th-"+n);
-  if(el){el.classList.add("active");el.scrollIntoView({block:"nearest"});}
-}
-function updateThumbDot(n){
-  const el=document.getElementById("td-"+n);
-  if(!el)return;
-  const s=pageStore[n];
-  const cnt=(s?.lines?.length||0)+(s?.polys?.filter(p=>p.closed).length||0);
-  el.textContent=cnt?cnt+" รายการ":"";
-}
+def _semantic_tag(kind: str, obj: dict | None = None) -> str:
+    obj = obj or {}
+    if kind == "poly":
+        area_type = obj.get("areaType") or "room"
+        if area_type == "land":
+            return "site_boundary"
+        if area_type in ("building", "gfa"):
+            return "gross_floor_area"
+        if area_type == "non_gfa":
+            return "floor_area"
+        return "use_area"
+    if kind == "opening":
+        return "deduction_opening"
+    if kind == "ref":
+        return "reference_line"
+    if kind == "line":
+        return "scale_line" if obj.get("semanticRole") == "scale" else "dimension_line"
+    if kind == "north":
+        return "north_arrow"
+    return "review_note"
 
-// ── load page ──────────────────────────────────────────
-async function loadPage(n){
-  saveCurrentPage(); updateThumbDot(curPage);
-  curPage=n; setThumbActive(n); setStatus("โหลดหน้า "+n+"…");
-  document.getElementById("page-lbl").textContent=n+" / "+totalPages;
-  document.getElementById("btn-prev").disabled=n<=1;
-  document.getElementById("btn-next").disabled=n>=totalPages;
-  mPts=[];calibPts=[];
-  calibPanel.style.display="none";
-  snapTarget=null;snapCur.style.display="none";snapLbl.style.display="none";
-  document.getElementById("measure-result").textContent="";
-  const rot=getRot(n);
-  const b=document.getElementById("rot-badge");
-  b.style.display=rot?"inline":"none"; b.textContent=rot?rot+"°":"";
-  restorePage(n);
-  await new Promise(res=>{
-    const img=new Image();
-    img.onload=()=>{bgImg=img;canvas.width=img.width;canvas.height=img.height;res();};
-    img.src=`/page/${n}?scale=${RS}&rot=${rot}`;
-  });
-  fitToWindow();redraw();
-  if(analyseCache[n]){pageData=analyseCache[n];updateAnalyseUI(pageData);}
-  fetchAnalyse(n);
-}
+def _use_category(obj: dict | None, semantic_tag: str) -> str | None:
+    if semantic_tag not in AREA_SEMANTIC_TAGS:
+        return None
+    value = (obj or {}).get("useCategory")
+    return value or None
 
-// ── fit ────────────────────────────────────────────────
-function fitToWindow(){
-  const W=ws.clientWidth,H=ws.clientHeight;
-  zoom=Math.min((W-20)/canvas.width,(H-20)/canvas.height,2);
-  panX=Math.round((W-canvas.width*zoom)/2);
-  panY=Math.round((H-canvas.height*zoom)/2);
-  applyT();
-}
-function applyT(){
-  cc.style.transform=`translate(${panX}px,${panY}px) scale(${zoom})`;
-  document.getElementById("zoom-val").textContent=Math.round(zoom*100)+"%";
-}
+@app.post("/export-xlsx")
+async def export_xlsx(body: dict):
+    if not HAS_XLSX:
+        return JSONResponse({"error": "xlsxwriter not installed"}, 501)
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
 
-// ── snap ───────────────────────────────────────────────
-function snap(cx,cy){
-  // cx,cy in canvas px
-  if(snapModes.off||!pageData) return{x:cx,y:cy,t:null};
-  const R=20/zoom;  // snap radius scales with zoom
-  let best=null,bd=R*R,bt=null;
+    page_store   = body.get("pageStore", {})
+    page_tags    = body.get("pageTags", {})
+    page_names   = body.get("pageNames", {})
+    project_info = body.get("projectInfo", {}) if isinstance(body.get("projectInfo", {}), dict) else {}
+    site_orientation = body.get("siteOrientation", {}) if isinstance(body.get("siteOrientation", {}), dict) else {}
+    page_scales  = body.get("pageScales", {})
+    pdf_name     = body.get("pdfName", "export")
+    page_count   = body.get("pageCount") or len(page_store)
+    warnings     = body.get("warnings", [])
+    audit_meta   = body.get("auditMeta", {}) if isinstance(body.get("auditMeta", {}), dict) else {}
+    try:
+        page_count = int(page_count)
+    except (TypeError, ValueError):
+        page_count = len(page_store)
+    store_pages = []
+    for key in page_store.keys():
+        try:
+            store_pages.append(int(key))
+        except (TypeError, ValueError):
+            pass
+    if store_pages:
+        page_count = max(page_count, max(store_pages))
 
-  const check=(sx,sy,t)=>{
-    if(!snapModes[t])return;
-    const d=(sx-cx)*(sx-cx)+(sy-cy)*(sy-cy);
-    if(d<bd){bd=d;best={x:sx,y:sy};bt=t;}
-  };
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
 
-  // static snaps (ep, mp, ct) — in rotated PDF pt, convert to canvas px
-  for(const s of (pageData.snaps||[])){
-    check(s.x*RS, s.y*RS, s.t);
-  }
+    fmt_hdr = wb.add_format({"bold": True, "bg_color": "#1F4E79", "font_color": "white", "border": 1, "align": "center", "valign": "vcenter"})
+    fmt_sub = wb.add_format({"bg_color": "#D6E4F0", "bold": True, "border": 1, "align": "center"})
+    fmt_cell = wb.add_format({"border": 1, "valign": "top"})
+    fmt_num  = wb.add_format({"border": 1, "num_format": '#,##0.00'})
+    fmt_total = wb.add_format({"bold": True, "bg_color": "#E2EFDA", "border": 1, "num_format": '#,##0.00'})
+    fmt_deduct = wb.add_format({"bold": True, "bg_color": "#FCE4EC", "border": 1, "num_format": '#,##0.00', "font_color": "#C62828"})
+    fmt_net  = wb.add_format({"bold": True, "bg_color": "#C6EFCE", "border": 1, "num_format": '#,##0.00', "font_color": "#006100"})
+    fmt_note = wb.add_format({"font_color": "#666666", "italic": True, "border": 1})
+    fmt_tag  = wb.add_format({"border": 1, "align": "center", "valign": "vcenter"})
 
-  // NL — nearest on segment
-  if(snapModes.nl){
-    for(const l of (pageData.lines||[])){
-      const p=nearestOnSeg(cx,cy, l[0]*RS,l[1]*RS, l[2]*RS,l[3]*RS);
-      check(p.x,p.y,"nl");
-    }
-  }
+    generated_at = audit_meta.get("generatedAt") or time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-  // IX — intersection of nearby line pairs
-  if(snapModes.ix){
-    const near=(pageData.lines||[]).filter(l=>{
-      const mx=(l[0]+l[2])/2*RS, my=(l[1]+l[3])/2*RS;
-      return Math.hypot(mx-cx,my-cy)<200;
-    });
-    for(let i=0;i<near.length;i++){
-      for(let j=i+1;j<near.length;j++){
-        const p=segIntersect(
-          near[i][0]*RS,near[i][1]*RS,near[i][2]*RS,near[i][3]*RS,
-          near[j][0]*RS,near[j][1]*RS,near[j][2]*RS,near[j][3]*RS);
-        if(p) check(p.x,p.y,"ix");
-      }
-    }
-  }
+    ws_cover = wb.add_worksheet("Cover")
+    ws_cover.set_column(0, 0, 24); ws_cover.set_column(1, 1, 44)
+    ws_cover.write(0, 0, "BMA-Plan Phase 1 Export", fmt_hdr)
+    cover_rows = [
+        ("PDF", pdf_name),
+        ("Generated At", generated_at),
+        ("Page Count", page_count),
+        ("Project No", project_info.get("reqNo", "")),
+        ("Building Type", project_info.get("buildingType", "")),
+        ("Work Type", project_info.get("workType", "")),
+        ("Floors", project_info.get("floors", "")),
+        ("GFA", project_info.get("gfa", "")),
+        ("Units", project_info.get("units", "")),
+        ("Area Objects", audit_meta.get("areaCount", "")),
+        ("Opening Objects", audit_meta.get("openingCount", "")),
+        ("Line Objects", audit_meta.get("lineCount", "")),
+        ("Reference Objects", audit_meta.get("refCount", "")),
+        ("Parking Markers", audit_meta.get("parkingCount", "")),
+        ("Gross Area", audit_meta.get("grossArea", "")),
+        ("Opening Area", audit_meta.get("openingArea", "")),
+        ("Net Area", audit_meta.get("netArea", "")),
+        ("Warning Count", len(warnings)),
+    ]
+    for r, (k, v) in enumerate(cover_rows, start=2):
+        ws_cover.write(r, 0, k, fmt_cell); ws_cover.write(r, 1, v, fmt_cell)
 
-  return best?{...best,t:bt}:{x:cx,y:cy,t:null};
-}
+    ws_warn = wb.add_worksheet("Warnings")
+    ws_warn.set_column(0, 0, 10); ws_warn.set_column(1, 1, 12); ws_warn.set_column(2, 2, 12)
+    ws_warn.set_column(3, 3, 20); ws_warn.set_column(4, 5, 44)
+    for c, h in enumerate(["id", "severity", "page_index", "object_id", "message", "suggested_action"]):
+        ws_warn.write(0, c, h, fmt_hdr)
+    for r, w in enumerate(warnings, start=1):
+        ws_warn.write(r, 0, w.get("id", ""), fmt_cell)
+        ws_warn.write(r, 1, w.get("severity", ""), fmt_cell)
+        ws_warn.write(r, 2, w.get("page_index", ""), fmt_cell)
+        ws_warn.write(r, 3, w.get("object_id", ""), fmt_cell)
+        ws_warn.write(r, 4, w.get("message", ""), fmt_cell)
+        ws_warn.write(r, 5, w.get("suggested_action", ""), fmt_cell)
 
-function nearestOnSeg(px,py,x0,y0,x1,y1){
-  const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;
-  if(len2<0.01)return{x:x0,y:y0};
-  const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));
-  return{x:x0+t*dx,y:y0+t*dy};
-}
-function segIntersect(x0,y0,x1,y1,x2,y2,x3,y3){
-  const d1x=x1-x0,d1y=y1-y0,d2x=x3-x2,d2y=y3-y2;
-  const cross=d1x*d2y-d1y*d2x;
-  if(Math.abs(cross)<0.5)return null;
-  const dx=x2-x0,dy=y2-y0;
-  const t=(dx*d2y-dy*d2x)/cross;
-  const u=(dx*d1y-dy*d1x)/cross;
-  if(t<-0.1||t>1.1||u<-0.1||u>1.1)return null;
-  return{x:x0+t*d1x,y:y0+t*d1y};
-}
+    ws_scales = wb.add_worksheet("Page Scales")
+    ws_scales.set_column(0, 0, 10); ws_scales.set_column(1, 1, 24); ws_scales.set_column(2, 6, 18)
+    for c, h in enumerate(["page", "page_name", "label", "pts_per_m", "source", "verified", "status"]):
+        ws_scales.write(0, c, h, fmt_hdr)
+    scale_row = 1
+    for pg in range(1, max(page_count, 0) + 1):
+        pg_str = str(pg)
+        sc = page_scales.get(pg_str, {}) if isinstance(page_scales, dict) else {}
+        if sc is None: sc = {}
+        ws_scales.write(scale_row, 0, pg, fmt_cell)
+        ws_scales.write(scale_row, 1, page_names.get(pg_str, f"หน้า {pg_str}"), fmt_cell)
+        ws_scales.write(scale_row, 2, sc.get("label", ""), fmt_cell)
+        ws_scales.write(scale_row, 3, sc.get("pts_per_m", ""), fmt_num)
+        ws_scales.write(scale_row, 4, sc.get("source", ""), fmt_cell)
+        ws_scales.write(scale_row, 5, bool(sc.get("verified", False)), fmt_cell)
+        ws_scales.write(scale_row, 6, sc.get("status", ""), fmt_cell)
+        scale_row += 1
 
-// ── measure helpers ────────────────────────────────────
-function ptsToM(p1,p2){
-  if(!pageData?.scale)return null;
-  return Math.hypot(p2.x-p1.x,p2.y-p1.y)/pageData.scale.pts_per_m;
-}
-function polyAreaM2(pts){
-  if(!pageData?.scale)return null;
-  let a=0;
-  for(let i=0;i<pts.length;i++){
-    const j=(i+1)%pts.length;
-    a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;
-  }
-  return Math.abs(a)/(2*pageData.scale.pts_per_m**2);
-}
-function toRNW(m2){
-  if(m2==null)return"";
-  return`${Math.floor(m2/1600)}-${Math.floor((m2%1600)/400)}-${((m2%400)/4).toFixed(2)} ว.`;
-}
-let _id=0;
-function nid(){return++_id;}
+    ws_facts = wb.add_worksheet("Site Facts")
+    ws_facts.set_column(0, 0, 10); ws_facts.set_column(1, 1, 24); ws_facts.set_column(2, 2, 18)
+    ws_facts.set_column(3, 3, 22); ws_facts.set_column(4, 4, 16); ws_facts.set_column(5, 5, 18)
+    ws_facts.set_column(6, 7, 34); ws_facts.set_column(8, 9, 18)
+    for c, h in enumerate(["page", "page_name", "fact_type", "object_id", "side_index", "label", "role_or_angle", "note", "semanticTag", "useCategory"]):
+        ws_facts.write(0, c, h, fmt_hdr)
+    fact_row = 1
+    for pg in range(1, max(page_count, 0) + 1):
+        pg_str = str(pg)
+        pg_name = page_names.get(pg_str, f"หน้า {pg_str}")
+        orient = site_orientation.get(pg_str, {}) if isinstance(site_orientation, dict) else {}
+        north = orient.get("north", {}) if isinstance(orient, dict) else {}
+        if isinstance(north, dict) and north:
+            ws_facts.write(fact_row, 0, pg, fmt_cell)
+            ws_facts.write(fact_row, 1, pg_name, fmt_cell)
+            ws_facts.write(fact_row, 2, "north", fmt_cell)
+            ws_facts.write(fact_row, 3, "", fmt_cell)
+            ws_facts.write(fact_row, 4, "", fmt_cell)
+            ws_facts.write(fact_row, 5, "N / ทิศเหนือ", fmt_cell)
+            ws_facts.write(fact_row, 6, north.get("angleDeg", ""), fmt_cell)
+            ws_facts.write(fact_row, 7, f"{north.get('source', '')} · {north.get('status', '')}", fmt_note)
+            ws_facts.write(fact_row, 8, north.get("semanticTag") or _semantic_tag("north", north), fmt_cell)
+            ws_facts.write(fact_row, 9, "", fmt_cell)
+            fact_row += 1
+        pg_data = page_store.get(pg_str, {}) if isinstance(page_store, dict) else {}
+        for poly in pg_data.get("polys", []):
+            if not poly.get("closed") or poly.get("areaType") != "land":
+                continue
+            for idx, tag in enumerate(poly.get("edgeTags", []) or []):
+                if not isinstance(tag, dict):
+                    continue
+                ws_facts.write(fact_row, 0, pg, fmt_cell)
+                ws_facts.write(fact_row, 1, pg_name, fmt_cell)
+                ws_facts.write(fact_row, 2, "parcel_side", fmt_cell)
+                ws_facts.write(fact_row, 3, poly.get("id", ""), fmt_cell)
+                ws_facts.write(fact_row, 4, idx + 1, fmt_cell)
+                ws_facts.write(fact_row, 5, tag.get("label", f"ด้าน {idx+1}"), fmt_cell)
+                ws_facts.write(fact_row, 6, tag.get("role") or tag.get("type", ""), fmt_cell)
+                ws_facts.write(fact_row, 7, tag.get("note", ""), fmt_note)
+                ws_facts.write(fact_row, 8, "parcel_side", fmt_cell)
+                ws_facts.write(fact_row, 9, "", fmt_cell)
+                fact_row += 1
 
-// ── redraw ─────────────────────────────────────────────
-function redraw(){
-  if(!bgImg)return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(bgImg,0,0);
+    ws_audit = wb.add_worksheet("Audit Log")
+    ws_audit.set_column(0, 0, 24); ws_audit.set_column(1, 1, 64)
+    audit_rows = [
+        ("generated_at", generated_at),
+        ("pdf_name", pdf_name),
+        ("source", "UI pageStore"),
+        ("area_count", audit_meta.get("areaCount", "")),
+        ("opening_count", audit_meta.get("openingCount", "")),
+        ("line_count", audit_meta.get("lineCount", "")),
+        ("reference_count", audit_meta.get("refCount", "")),
+        ("parking_count", audit_meta.get("parkingCount", "")),
+        ("warning_count", len(warnings)),
+    ]
+    for r, (k, v) in enumerate(audit_rows):
+        ws_audit.write(r, 0, k, fmt_hdr if r == 0 else fmt_cell)
+        ws_audit.write(r, 1, v, fmt_cell)
 
-  const lw=Math.max(1, 2/zoom);  // line width stays ~2px on screen
-  const ds=[8/zoom,4/zoom];       // dash stays ~8px on screen
+    # ── Sheet 1: สรุปพื้นที่ (with Tag column) ──
+    ws = wb.add_worksheet("สรุปพื้นที่")
+    ws.set_column(0, 0, 18); ws.set_column(1, 1, 12); ws.set_column(2, 2, 28)
+    ws.set_column(3, 3, 14); ws.set_column(4, 4, 14); ws.set_column(5, 5, 14)
+    ws.set_column(6, 6, 14); ws.set_column(7, 7, 40); ws.set_column(8, 9, 18)
+    row = 0
+    ws.merge_range(row, 0, row, 9, f"สรุปพื้นที่ — {pdf_name}", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    row += 2
+    headers = ["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "พื้นที่ (ตร.ม.)", "ไร่", "งาน", "ตารางวา", "หมายเหตุ", "semanticTag", "useCategory"]
+    for c, h in enumerate(headers): ws.write(row, c, h, fmt_hdr)
+    row += 1
+    grand_total = 0.0; grand_openings = 0.0
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str); pg_data = page_store[pg_str]
+        tag = page_tags.get(pg_str, ""); pg_name = page_names.get(pg_str, f"หน้า {pg}")
+        tag_label = TAG_LABELS.get(tag, tag) if tag else ""
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        polys = pg_data.get("polys", []); openings = pg_data.get("openings", [])
+        if not polys and not openings: continue
+        ws.merge_range(row, 0, row, 9, pg_name, fmt_sub); row += 1
+        pg_total = 0.0; pg_openings = 0.0
+        for poly in polys:
+            if not poly.get("closed"): continue
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m ** 2)
+            name = poly.get("name", ""); area_type = poly.get("areaType", "room")
+            semantic_tag = poly.get("semanticTag") or _semantic_tag("poly", poly)
+            use_category = _use_category(poly, semantic_tag)
+            rwu = _m2_to_rwu(area) if area_type == "land" else ""
+            note = f"สเกล: {scale_info.get('label', '-')}" if isinstance(scale_info, dict) else ""
+            ws.write(row, 0, pg_name, fmt_cell); ws.write(row, 1, tag_label, fmt_tag)
+            ws.write(row, 2, name or f"พื้นที่ {poly.get('id', '')}", fmt_cell)
+            ws.write(row, 3, round(area, 2) if area else None, fmt_num)
+            if area_type == "land" and area > 0:
+                ws.write(row, 4, rwu[0] if rwu else None, fmt_num)
+                ws.write(row, 5, rwu[1] if rwu else None, fmt_num)
+                ws.write(row, 6, rwu[2] if rwu else None, fmt_num)
+            else:
+                ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
+            ws.write(row, 7, note, fmt_note)
+            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, use_category or "", fmt_cell); row += 1
+            if area > 0: pg_total += area
+        for op in openings:
+            area = op.get("area", 0) or 0; name = op.get("name", "ช่องว่าง")
+            if area <= 0 and op.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(op["pts"]) / (pts_per_m ** 2)
+            ws.write(row, 0, "", fmt_cell); ws.write(row, 1, "", fmt_tag)
+            ws.write(row, 2, f"(-) {name}", fmt_cell)
+            ws.write(row, 3, -round(area, 2) if area else None, fmt_deduct)
+            ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
+            semantic_tag = op.get("semanticTag") or _semantic_tag("opening", op)
+            ws.write(row, 7, op.get("note", "หักช่องว่าง"), fmt_note)
+            ws.write(row, 8, semantic_tag, fmt_cell); ws.write(row, 9, "", fmt_cell); row += 1
+            if area > 0: pg_openings += area
+        net = pg_total - pg_openings
+        ws.write(row, 0, "", fmt_cell); ws.write(row, 1, "", fmt_tag)
+        ws.write(row, 2, "รวมสุทธิ", fmt_cell); ws.write(row, 3, round(net, 2), fmt_net)
+        ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
+        ws.write(row, 7, f"รวม {pg_total:.2f} − ช่องว่าง {pg_openings:.2f}", fmt_note)
+        ws.write(row, 8, "", fmt_cell); ws.write(row, 9, "", fmt_cell); row += 2
+        grand_total += pg_total; grand_openings += pg_openings
+    ws.merge_range(row, 0, row, 2, "รวมทั้งโปรเจกต์", fmt_hdr)
+    ws.write(row, 3, round(grand_total, 2), fmt_total)
+    ws.write(row, 4, "", fmt_cell); ws.write(row, 5, "", fmt_cell); ws.write(row, 6, "", fmt_cell)
+    ws.write(row, 7, f"รวม {grand_total:.2f} − ช่องว่าง {grand_openings:.2f} = สุทธิ {grand_total - grand_openings:.2f} ตร.ม.", fmt_note)
+    ws.write(row, 8, "", fmt_cell); ws.write(row, 9, "", fmt_cell)
 
-  mLines.forEach(s=>{
-    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
-    const col=s.color||"#ffd60a", opa=s.opacity??0.85;
-    ctx.save();ctx.globalAlpha=opa;
-    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-    ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash(ds);ctx.stroke();
-    ctx.restore();
-    const lbl=s.dist!=null?s.dist.toFixed(2)+" ม.":s.ptDist.toFixed(1)+" pt";
-    drawLbl((a.x+b.x)/2,(a.y+b.y)/2,lbl);
-  });
+    # ── Sheet 2: ความยาวเส้น Polygon (with Tag) ──
+    ws2 = wb.add_worksheet("ความยาวเส้น Polygon")
+    ws2.set_column(0, 0, 18); ws2.set_column(1, 1, 12); ws2.set_column(2, 2, 28)
+    ws2.set_column(3, 3, 14); ws2.set_column(4, 4, 14); ws2.set_column(5, 5, 40); ws2.set_column(6, 7, 18)
+    r2 = 0
+    ws2.merge_range(r2, 0, r2, 7, "ความยาวเส้นทุกด้านของ Polygon", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r2 += 2
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ชื่อพื้นที่", "ด้านที่", "ความยาว (ม.)", "หมายเหตุ", "semanticTag", "useCategory"]):
+        ws2.write(r2, c, h, fmt_hdr)
+    r2 += 1
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str); pg_data = page_store[pg_str]
+        pg_name = page_names.get(pg_str, f"หน้า {pg}")
+        tag = page_tags.get(pg_str, ""); tag_label = TAG_LABELS.get(tag, tag) if tag else ""
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        if pts_per_m <= 0: continue
+        for poly in pg_data.get("polys", []):
+            if not poly.get("closed") or not poly.get("pts"): continue
+            name = poly.get("name", f"พื้นที่ {poly.get('id', '')}"); pts = poly["pts"]
+            semantic_tag = poly.get("semanticTag") or _semantic_tag("poly", poly)
+            use_category = _use_category(poly, semantic_tag)
+            for i in range(len(pts)):
+                p1 = pts[i]; p2 = pts[(i + 1) % len(pts)]
+                dist_pt = math.hypot(p2["x"] - p1["x"], p2["y"] - p1["y"])
+                dist_m = dist_pt / pts_per_m
+                ws2.write(r2, 0, pg_name, fmt_cell); ws2.write(r2, 1, tag_label, fmt_tag)
+                ws2.write(r2, 2, name, fmt_cell); ws2.write(r2, 3, f"ด้าน {i+1}", fmt_cell)
+                ws2.write(r2, 4, round(dist_m, 2), fmt_num); ws2.write(r2, 5, f"{dist_pt:.1f} pt", fmt_note)
+                ws2.write(r2, 6, semantic_tag, fmt_cell); ws2.write(r2, 7, use_category or "", fmt_cell)
+                r2 += 1
 
-  mPolys.forEach(poly=>{
-    if(poly.pts.length<2)return;
-    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
-    const col=poly.color||"#30d158", opa=poly.opacity??0.85;
-    ctx.save();ctx.globalAlpha=opa;
-    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
-    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
-    if(poly.closed)ctx.closePath();
-    ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.stroke();
-    if(poly.closed){ctx.fillStyle=hexAlpha(col,.08);ctx.fill();}
-    ctx.restore();
-    if(poly.closed){
-      const cx2=cp.reduce((s,p)=>s+p.x,0)/cp.length;
-      const cy2=cp.reduce((s,p)=>s+p.y,0)/cp.length;
-      drawPolyLabel(cx2,cy2,poly.name,poly.area,poly.areaType);
-    }
-  });
+    # ── Sheet 3: สรุปตามชั้น ──
+    ws3 = wb.add_worksheet("สรุปตามชั้น")
+    ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 14)
+    ws3.set_column(3, 3, 18); ws3.set_column(4, 4, 12)
+    r3 = 0
+    ws3.merge_range(r3, 0, r3, 4, "สรุปพื้นที่ตามชั้น", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r3 += 2
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "จำนวนห้อง", "พื้นที่รวม (ตร.ม.)", "%"]):
+        ws3.write(r3, c, h, fmt_hdr)
+    r3 += 1
+    grand_total_all = 0.0
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str); pg_data = page_store[pg_str]
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        closed_polys = [p for p in pg_data.get("polys", []) if p.get("closed")]
+        if not closed_polys: continue
+        pg_area = 0.0
+        for poly in closed_polys:
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m ** 2)
+            pg_area += area
+        grand_total_all += pg_area
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str); pg_data = page_store[pg_str]
+        pg_name = page_names.get(pg_str, f"หน้า {pg}")
+        tag = page_tags.get(pg_str, ""); tag_label = TAG_LABELS.get(tag, tag) if tag else ""
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        closed_polys = [p for p in pg_data.get("polys", []) if p.get("closed")]
+        if not closed_polys: continue
+        pg_area = 0.0
+        for poly in closed_polys:
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m ** 2)
+            pg_area += area
+        pct = (pg_area / grand_total_all * 100) if grand_total_all > 0 else 0
+        ws3.write(r3, 0, pg_name, fmt_cell); ws3.write(r3, 1, tag_label, fmt_tag)
+        ws3.write(r3, 2, len(closed_polys), fmt_cell)
+        ws3.write(r3, 3, round(pg_area, 2), fmt_num)
+        ws3.write(r3, 4, f"{pct:.1f}%", fmt_cell)
+        r3 += 1
+    if grand_total_all > 0:
+        ws3.write(r3, 0, "", fmt_cell); ws3.write(r3, 1, "", fmt_tag)
+        ws3.write(r3, 2, "", fmt_cell); ws3.write(r3, 3, round(grand_total_all, 2), fmt_total)
+        ws3.write(r3, 4, "100%", fmt_cell)
 
-  // in-progress pts
-  if(mPts.length>0){
-    const cp=mPts.map(p=>pdfToC(p.x,p.y));
-    ctx.save();
-    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
-    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
-    ctx.strokeStyle=curColor;ctx.lineWidth=lw;ctx.setLineDash([6/zoom,3/zoom]);ctx.stroke();ctx.restore();
-    cp.forEach(p=>{
-      ctx.beginPath();ctx.arc(p.x,p.y,4/zoom,0,Math.PI*2);
-      ctx.fillStyle=curColor;ctx.fill();
-    });
-  }
+    # ── Sheet 4: สรุปตามประเภท ──
+    ws4 = wb.add_worksheet("สรุปตามประเภท")
+    ws4.set_column(0, 0, 18); ws4.set_column(1, 1, 14); ws4.set_column(2, 2, 18)
+    ws4.set_column(3, 3, 12)
+    r4 = 0
+    ws4.merge_range(r4, 0, r4, 3, "สรุปพื้นที่ตามประเภท", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r4 += 2
+    for c, h in enumerate(["ประเภท (Tag)", "จำนวน", "พื้นที่รวม (ตร.ม.)", "%"]):
+        ws4.write(r4, c, h, fmt_hdr)
+    r4 += 1
+    tag_stats = {}
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str); pg_data = page_store[pg_str]
+        tag = page_tags.get(pg_str, "") or "untagged"
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        for poly in pg_data.get("polys", []):
+            if not poly.get("closed"): continue
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m ** 2)
+            if tag not in tag_stats: tag_stats[tag] = {"count": 0, "area": 0.0}
+            tag_stats[tag]["count"] += 1; tag_stats[tag]["area"] += area
+    total_by_tag = sum(s["area"] for s in tag_stats.values())
+    for tag, stats in sorted(tag_stats.items()):
+        tag_label = TAG_LABELS.get(tag, tag) if tag != "untagged" else "ไม่ได้ระบุ"
+        pct = (stats["area"] / total_by_tag * 100) if total_by_tag > 0 else 0
+        ws4.write(r4, 0, tag_label, fmt_cell); ws4.write(r4, 1, stats["count"], fmt_cell)
+        ws4.write(r4, 2, round(stats["area"], 2), fmt_num)
+        ws4.write(r4, 3, f"{pct:.1f}%", fmt_cell)
+        r4 += 1
+    if total_by_tag > 0:
+        ws4.write(r4, 0, "รวม", fmt_cell); ws4.write(r4, 1, sum(s["count"] for s in tag_stats.values()), fmt_cell)
+        ws4.write(r4, 2, round(total_by_tag, 2), fmt_total); ws4.write(r4, 3, "100%", fmt_cell)
 
-  // calib
-  calibPts.forEach(p=>{
-    ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,8,0,Math.PI*2);
-    ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.stroke();
-    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fillStyle="#bf5af2";ctx.fill();ctx.restore();
-  });
-  if(calibPts.length===2){
-    ctx.save();ctx.beginPath();ctx.moveTo(calibPts[0].x,calibPts[0].y);
-    ctx.lineTo(calibPts[1].x,calibPts[1].y);
-    ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.setLineDash([10,5]);ctx.stroke();ctx.restore();
-  }
+    # ── Sheet 5: สรุปที่จอดรถ ──
+    ws5 = wb.add_worksheet("ที่จอดรถ")
+    ws5.set_column(0, 0, 18); ws5.set_column(1, 1, 12); ws5.set_column(2, 2, 18)
+    ws5.set_column(3, 3, 12); ws5.set_column(4, 4, 36); ws5.set_column(5, 6, 18)
+    r5 = 0
+    ws5.merge_range(r5, 0, r5, 6, "สรุปที่จอดรถจากจุดที่ผู้ใช้ mark", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r5 += 2
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "ประเภทที่จอด", "จำนวน (คัน)", "หมายเหตุ", "semanticTag", "useCategory"]):
+        ws5.write(r5, c, h, fmt_hdr)
+    r5 += 1
+    parking_totals = {}
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg_data = page_store[pg_str]
+        pg_name = page_names.get(pg_str, f"หน้า {pg_str}")
+        tag = page_tags.get(pg_str, ""); tag_label = TAG_LABELS.get(tag, tag) if tag else ""
+        by_type = {}
+        by_semantic = {}
+        for park in pg_data.get("parking", []):
+            ptype = park.get("parkingType") or "car"
+            by_type[ptype] = by_type.get(ptype, 0) + (park.get("count") or 1)
+            by_semantic.setdefault(ptype, park.get("semanticTag") or _semantic_tag("parking", park))
+            parking_totals[ptype] = parking_totals.get(ptype, 0) + (park.get("count") or 1)
+        for ptype, count in sorted(by_type.items()):
+            ws5.write(r5, 0, pg_name, fmt_cell); ws5.write(r5, 1, tag_label, fmt_tag)
+            ws5.write(r5, 2, ptype, fmt_cell); ws5.write(r5, 3, count, fmt_cell)
+            ws5.write(r5, 4, "ข้อมูลนับจาก marker ยังไม่เทียบเกณฑ์กฎหมาย", fmt_note)
+            ws5.write(r5, 5, by_semantic.get(ptype, "review_note"), fmt_cell); ws5.write(r5, 6, "", fmt_cell)
+            r5 += 1
+    if parking_totals:
+        ws5.write(r5, 0, "รวม", fmt_cell); ws5.write(r5, 1, "", fmt_tag)
+        ws5.write(r5, 2, ", ".join(f"{k}: {v}" for k, v in sorted(parking_totals.items())), fmt_cell)
+        ws5.write(r5, 3, sum(parking_totals.values()), fmt_total)
+        ws5.write(r5, 4, "", fmt_note); ws5.write(r5, 5, "", fmt_cell); ws5.write(r5, 6, "", fmt_cell)
 
-  // snap dot on canvas
-  if(snapTarget&&mode!=="pan"&&mode!=="sel"){
-    const col=SNAP_COLORS[snapTarget.t]||"#ffd60a";
-    ctx.save();ctx.beginPath();ctx.arc(snapTarget.x,snapTarget.y,7,0,Math.PI*2);
-    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
-    ctx.beginPath();ctx.arc(snapTarget.x,snapTarget.y,2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
-    ctx.restore();
-  }
+    # ── Sheet 6: ระยะถึงเส้นอ้างอิง ──
+    ws6 = wb.add_worksheet("ระยะอ้างอิง")
+    ws6.set_column(0, 0, 18); ws6.set_column(1, 1, 12); ws6.set_column(2, 2, 24)
+    ws6.set_column(3, 3, 28); ws6.set_column(4, 4, 14); ws6.set_column(5, 5, 28); ws6.set_column(6, 7, 18)
+    r6 = 0
+    ws6.merge_range(r6, 0, r6, 7, "รายงานระยะ object ถึงเส้นอ้างอิง", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r6 += 2
+    for c, h in enumerate(["หน้า / ชั้น", "Tag", "เส้นอ้างอิง", "Object", "ระยะ", "หมายเหตุ", "semanticTag", "useCategory"]):
+        ws6.write(r6, c, h, fmt_hdr)
+    r6 += 1
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg_data = page_store[pg_str]
+        refs = pg_data.get("refs", [])
+        if not refs:
+            continue
+        pg_name = page_names.get(pg_str, f"หน้า {pg_str}")
+        tag = page_tags.get(pg_str, ""); tag_label = TAG_LABELS.get(tag, tag) if tag else ""
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        objects = []
+        for kind, items in (("parking", pg_data.get("parking", [])), ("poly", pg_data.get("polys", [])), ("opening", pg_data.get("openings", [])), ("line", pg_data.get("lines", []))):
+            for idx, obj in enumerate(items):
+                if kind in ("poly", "opening") and not obj.get("closed"):
+                    continue
+                objects.append((kind, idx, obj))
+        for ref in refs:
+            ref_name = ref.get("name") or ref.get("refType") or "reference"
+            for kind, idx, obj in objects:
+                best = None
+                for pt in _object_points_for_ref_report(kind, obj):
+                    hit = _distance_to_ref(pt, ref)
+                    if hit and (best is None or hit["dist_pt"] < best["dist_pt"]):
+                        best = hit
+                if not best:
+                    continue
+                if kind == "parking":
+                    obj_name = f"parking {idx+1} ({obj.get('parkingType', 'car')})"
+                elif kind == "poly":
+                    obj_name = obj.get("name") or obj.get("areaType") or f"poly {idx+1}"
+                elif kind == "opening":
+                    obj_name = obj.get("name") or f"opening {idx+1}"
+                else:
+                    obj_name = "path" if obj.get("kind") == "path" else "line"
+                dist_val = best["dist_pt"] / pts_per_m if pts_per_m > 0 else best["dist_pt"]
+                unit = "ม." if pts_per_m > 0 else "pt"
+                ws6.write(r6, 0, pg_name, fmt_cell); ws6.write(r6, 1, tag_label, fmt_tag)
+                ws6.write(r6, 2, ref_name, fmt_cell); ws6.write(r6, 3, obj_name, fmt_cell)
+                ws6.write(r6, 4, round(dist_val, 2), fmt_num)
+                ws6.write(r6, 5, f"{best.get('point_role', '')} · {unit}", fmt_note)
+                semantic_tag = obj.get("semanticTag") or _semantic_tag(kind if kind != "poly" else "poly", obj)
+                ws6.write(r6, 6, semantic_tag, fmt_cell); ws6.write(r6, 7, _use_category(obj, semantic_tag) or "", fmt_cell)
+                r6 += 1
 
-  // selection highlight
-  if(selItem&&mode==="sel") drawSelHighlight(selItem);
-}
+    wb.close(); buf.seek(0)
+    safe = pdf_name.replace("/", "_").replace("\\", "_").replace(".pdf", "")
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_report.xlsx"'})
 
-function drawSelHighlight(sel){
-  const hw=6/zoom;  // handle half-width in canvas px
-  ctx.save();
-  ctx.strokeStyle="#fff";ctx.lineWidth=2/zoom;ctx.setLineDash([6/zoom,3/zoom]);
-  if(sel.type==="line"&&mLines[sel.idx]){
-    const s=mLines[sel.idx];
-    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
-    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
-    // endpoint handles
-    [a,b].forEach(p=>{
-      ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);
-      ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);
-    });
-  }else if(sel.type==="poly"&&mPolys[sel.idx]){
-    const poly=mPolys[sel.idx];
-    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
-    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
-    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
-    if(poly.closed)ctx.closePath();
-    ctx.stroke();
-    // vertex handles
-    cp.forEach(p=>{
-      ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);
-      ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);
-    });
-  }
-  ctx.restore();
-}
 
-// Labels always appear ~13px on screen regardless of zoom
-function lblFs(){return Math.max(10, Math.round(13/zoom));}
+def _m2_to_rwu(m2):
+    if m2 <= 0:
+        return (0, 0, 0)
+    rai = int(m2 // 1600)
+    rem = m2 % 1600
+    ngan = int(rem // 400)
+    sqwa = round((rem % 400) / 4, 2)
+    return (rai, ngan, sqwa)
 
-function drawLbl(x,y,t){
-  const fs=lblFs(), pad=Math.round(3/zoom);
-  ctx.save();ctx.font=`bold ${fs}px sans-serif`;
-  const tw=ctx.measureText(t).width;
-  ctx.fillStyle="rgba(0,0,0,.72)";
-  ctx.fillRect(x-tw/2-pad, y-fs*0.85, tw+pad*2, fs*1.25);
-  ctx.fillStyle="#ffffff";ctx.fillText(t,x-tw/2,y+fs*0.3);
-  ctx.restore();
-}
-function drawPolyLabel(cx2,cy2,name,area,areaType){
-  const fs=lblFs(), lh=Math.round(fs*1.4), pad=Math.round(4/zoom);
-  ctx.save();ctx.font=`bold ${fs}px sans-serif`;
-  const rows=[];
-  if(name) rows.push({t:name,c:"#5ac8fa"});
-  if(area!=null){
-    rows.push({t:area.toFixed(2)+" ตร.ม.",c:"#ffffff"});
-    if(areaType==="land") rows.push({t:toRNW(area),c:"#a8e6c0"});
-  }
-  if(!rows.length){ctx.restore();return;}
-  const mw=Math.max(...rows.map(r=>ctx.measureText(r.t).width));
-  const bh=rows.length*lh+pad*2;
-  const bx=cx2-mw/2-pad, by=cy2-bh/2;
-  ctx.fillStyle="rgba(0,0,0,.72)";
-  ctx.beginPath();
-  if(ctx.roundRect) ctx.roundRect(bx,by,mw+pad*2,bh,Math.round(4/zoom));
-  else ctx.rect(bx,by,mw+pad*2,bh);
-  ctx.fill();
-  rows.forEach((r,i)=>{
-    const tw=ctx.measureText(r.t).width;
-    ctx.fillStyle=r.c;
-    ctx.fillText(r.t,cx2-tw/2,by+pad+fs*0.9+i*lh);
-  });
-  ctx.restore();
-}
 
-// ── screen ─────────────────────────────────────────────
-function cXY(e){
-  const r=canvas.getBoundingClientRect();
-  return{x:(e.clientX-r.left)*(canvas.width/r.width),
-         y:(e.clientY-r.top)*(canvas.height/r.height)};
-}
+# Load UI from external file (hot-reload on change)
+UI_PATH = os.path.join(os.path.dirname(__file__), "ui.html")
+_HTML_CACHE = None
+_HTML_MTIME = 0
 
-// ── hit detection ─────────────────────────────────────
-function distToSeg(px,py,x0,y0,x1,y1){
-  const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;
-  if(len2<0.01) return Math.hypot(px-x0,py-y0);
-  const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));
-  return Math.hypot(px-x0-t*dx,py-y0-t*dy);
-}
-function ptInPoly(px,py,pts){
-  let inside=false;
-  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
-    const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;
-    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
-  }
-  return inside;
-}
-function hitTest(cx,cy){
-  // cx,cy in canvas px — returns {type,idx} or null
-  const THR=12/zoom;
-  // check polys first (filled area easier to click)
-  for(let i=mPolys.length-1;i>=0;i--){
-    const poly=mPolys[i];
-    if(!poly.closed) continue;
-    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
-    if(ptInPoly(cx,cy,cp)) return{type:"poly",idx:i};
-    // also check border
-    for(let j=0;j<cp.length;j++){
-      const nj=(j+1)%cp.length;
-      if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR)
-        return{type:"poly",idx:i};
-    }
-  }
-  // check lines
-  for(let i=mLines.length-1;i>=0;i--){
-    const s=mLines[i];
-    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
-    if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR) return{type:"line",idx:i};
-  }
-  return null;
-}
+def _load_html():
+    global _HTML_CACHE, _HTML_MTIME
+    try:
+        mtime = os.path.getmtime(UI_PATH)
+        if mtime > _HTML_MTIME:
+            with open(UI_PATH, "r", encoding="utf-8") as f:
+                _HTML_CACHE = f.read()
+            _HTML_MTIME = mtime
+    except Exception:
+        pass
+    return _HTML_CACHE or "<h1>ui.html not found</h1>"
 
-// ── click ──────────────────────────────────────────────
-ws.addEventListener("mousedown",e=>{
-  if(e.button===2)return;
-  // select mode
-  if(mode==="sel"){
-    const {x:cx,y:cy}=cXY(e);
-    const hit=hitTest(cx,cy);
-    if(hit){
-      selItem=hit;
-      syncColorBar(hit);
-      // start drag — store starting PDF pt and original data
-      const pStart=cToPdf(cx,cy);
-      let origData;
-      if(hit.type==="line"){
-        const s=mLines[hit.idx];
-        origData={x0:s.x0,y0:s.y0,x1:s.x1,y1:s.y1};
-      }else{
-        origData=mPolys[hit.idx].pts.map(p=>({...p}));
-      }
-      dragState={...hit,startPdf:pStart,origData};
-      ws.style.cursor="move";
-    }else{
-      selItem=null;dragState=null;
-    }
-    redraw();return;
-  }
-  if(mode==="pan"||e.button===1||spaceDown){
-    isPan=true;lastMx=e.clientX;lastMy=e.clientY;ws.style.cursor="grabbing";return;
-  }
-  const {x:cx,y:cy}=cXY(e);
-  const sc=snap(cx,cy);
-  const p=cToPdf(sc.x,sc.y);  // store as unrotated PDF pt
+HTML = _load_html()  # initial load
 
-  if(mode==="dist"){
-    mPts.push(p);
-    if(mPts.length===1){
-      document.getElementById("measure-result").textContent="• คลิกจุดที่ 2";
-    }else{
-      const dist=ptsToM(mPts[0],mPts[1]);
-      const ptD=Math.hypot(mPts[1].x-mPts[0].x,mPts[1].y-mPts[0].y);
-      const base={x0:mPts[0].x,y0:mPts[0].y,x1:mPts[1].x,y1:mPts[1].y,
-                  ptDist:ptD,id:nid(),color:curColor,opacity:curOpacity};
-      pushUndo();
-      if(dist!=null){
-        mLines.push({...base,dist});
-        document.getElementById("measure-result").textContent="📏 "+dist.toFixed(3)+" ม.";
-      }else{
-        mLines.push({...base,dist:null});
-        document.getElementById("measure-result").textContent="📏 "+ptD.toFixed(1)+" pt (สอบเทียบก่อน)";
-      }
-      mPts=[];
-    }
-  }else if(mode==="area"){
-    if(mPts.length>=2){
-      const c0=pdfToC(mPts[0].x,mPts[0].y);
-      if(Math.hypot(sc.x-c0.x,sc.y-c0.y)<18){
-        const area=polyAreaM2(mPts);
-        curAType="room"; setAType("room");
-        const poly={pts:[...mPts],closed:true,area,name:"",areaType:"room",
-                    id:nid(),color:curColor,opacity:curOpacity};
-        pushUndo();
-        mPolys.push(poly);
-        if(area!=null)
-          document.getElementById("measure-result").textContent=
-            `⬡ ${area.toFixed(2)} ตร.ม.`;
-        mPts=[];
-        openNamePanel("ชื่อพื้นที่",(nm,at)=>{poly.name=nm;poly.areaType=at;redraw();},
-          "", true);
-        return;
-      }
-    }
-    mPts.push(p);
-  }else if(mode==="calib"){
-    calibPts.push({x:sc.x,y:sc.y});
-    if(calibPts.length===1){setStatus("คลิกจุดที่ 2…");redraw();return;}
-    if(calibPts.length===2){
-      const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;
-      document.getElementById("calib-line-info").textContent=
-        "เส้น "+Math.hypot(dx,dy).toFixed(1)+" pt · ป้อนระยะจริง:";
-      calibPanel.style.display="block";
-      document.getElementById("calib-input").value="";
-      document.getElementById("calib-input").focus();
-    }
-    return;
-  }
-  redraw();
-});
-
-// ── context menu ───────────────────────────────────────
-ws.addEventListener("contextmenu",e=>{
-  e.preventDefault();
-  const {x:cx,y:cy}=cXY(e);
-  // in select mode, prefer the already-selected item if click is near it
-  const hit=(mode==="sel"&&selItem)?selItem:findNearest(cx,cy,40);
-  if(!hit){ctxMenu.style.display="none";return;}
-  ctxTarget=hit;
-  if(mode==="sel"){selItem=hit;redraw();}
-  // sync color row to item's current color
-  const ctxObj=hit.type==="line"?mLines[hit.idx]:mPolys[hit.idx];
-  if(ctxObj){
-    const c=ctxObj.color||curColor, o=Math.round((ctxObj.opacity??curOpacity)*100);
-    document.getElementById("ctx-inp-color").value=c.length===7?c:"#30d158";
-    document.getElementById("ctx-inp-opacity").value=o;
-    document.getElementById("ctx-opacity-val").textContent=o+"%";
-  }
-  document.getElementById("ctx-rename").style.display=hit.type==="poly"?"block":"none";
-  // position menu (flip if near bottom/right edge)
-  const mw=200, mh=150;
-  const lx=e.clientX+mw>innerWidth?e.clientX-mw:e.clientX;
-  const ly=e.clientY+mh>innerHeight?e.clientY-mh:e.clientY;
-  ctxMenu.style.left=lx+"px";ctxMenu.style.top=ly+"px";
-  ctxMenu.style.display="block";
-});
-// stop ctx-menu clicks from closing the menu via document listener
-ctxMenu.addEventListener("click",e=>e.stopPropagation());
-
-function findNearest(cx,cy,r){
-  let best=null,bd=r;
-  mLines.forEach((s,i)=>{
-    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
-    const d=Math.hypot(cx-(a.x+b.x)/2, cy-(a.y+b.y)/2);
-    if(d<bd){bd=d;best={type:"line",idx:i};}
-  });
-  mPolys.forEach((poly,i)=>{
-    if(!poly.closed)return;
-    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
-    const mx=cp.reduce((s,p)=>s+p.x,0)/cp.length;
-    const my=cp.reduce((s,p)=>s+p.y,0)/cp.length;
-    const d=Math.hypot(cx-mx,cy-my);
-    if(d<bd){bd=d;best={type:"poly",idx:i};}
-  });
-  return best;
-}
-function ctxColor(c){
-  if(!ctxTarget)return;
-  const obj=ctxTarget.type==="line"?mLines[ctxTarget.idx]:mPolys[ctxTarget.idx];
-  if(obj){obj.color=c;redraw();}
-  curColor=c;
-  document.getElementById("inp-color").value=c.length===7?c:"#30d158";
-}
-function ctxOpacity(v){
-  if(!ctxTarget)return;
-  const obj=ctxTarget.type==="line"?mLines[ctxTarget.idx]:mPolys[ctxTarget.idx];
-  if(obj){obj.opacity=v/100;redraw();}
-  curOpacity=v/100;
-  document.getElementById("ctx-opacity-val").textContent=v+"%";
-  document.getElementById("inp-opacity").value=v;
-  document.getElementById("opacity-val").textContent=v+"%";
-}
-function ctxDelete(){
-  if(!ctxTarget)return;
-  pushUndo();
-  if(ctxTarget.type==="line") mLines.splice(ctxTarget.idx,1);
-  else mPolys.splice(ctxTarget.idx,1);
-  ctxTarget=null;redraw();
-}
-function ctxRename(){
-  if(!ctxTarget||ctxTarget.type!=="poly")return;
-  const poly=mPolys[ctxTarget.idx];
-  openNamePanel("เปลี่ยนชื่อ",(nm)=>{poly.name=nm;redraw();},poly.name);
-}
-
-// ── name panel ─────────────────────────────────────────
-function openNamePanel(title,cb,val="",showAType=false){
-  document.getElementById("name-panel-title").textContent=title;
-  document.getElementById("name-input").value=val;
-  document.getElementById("atype-row").style.display=showAType?"flex":"none";
-  if(showAType){curAType="room";setAType("room");}
-  namePanel.style.display="block";
-  document.getElementById("name-input").focus();
-  nameCb=cb;
-}
-function finishName(){
-  const v=document.getElementById("name-input").value.trim();
-  namePanel.style.display="none";
-  if(nameCb)nameCb(v, curAType); nameCb=null;
-}
-function cancelName(){
-  namePanel.style.display="none";
-  if(nameCb)nameCb("", curAType); nameCb=null;
-}
-document.getElementById("name-input").addEventListener("keydown",e=>{
-  if(e.key==="Enter")finishName();
-  if(e.key==="Escape")cancelName();
-});
-
-// ── calibrate ──────────────────────────────────────────
-function finishCalib(){
-  const dist=parseFloat(document.getElementById("calib-input").value);
-  if(!dist||dist<=0){alert("ระยะต้องมากกว่า 0");return;}
-  if(calibPts.length<2){cancelCalib();return;}
-  const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;
-  const ppm=Math.hypot(dx,dy)/dist;
-  const N=Math.round(1000*(72/25.4)/ppm);
-  const sc={N,label:`★ 1:${N} (สอบเทียบ)`,pts_per_m:ppm,calibrated:true};
-  if(!pageData)pageData={};
-  pageData.scale=sc;
-  getStore(curPage).calibScale=sc;
-  document.getElementById("scale-badge").className="ok";
-  document.getElementById("scale-badge").textContent=sc.label;
-  document.getElementById("lbl-scale").textContent=sc.label;
-  calibPanel.style.display="none"; calibPts=[];
-  setMode("dist");
-  setStatus(`✅ 1:${N} สอบเทียบแล้ว`);
-}
-function cancelCalib(){calibPts=[];calibPanel.style.display="none";setMode("pan");}
-
-// ── mouse move ─────────────────────────────────────────
-ws.addEventListener("mousemove",e=>{
-  if(isPan){panX+=e.clientX-lastMx;panY+=e.clientY-lastMy;lastMx=e.clientX;lastMy=e.clientY;applyT();return;}
-
-  // select+drag
-  if(mode==="sel"){
-    const {x:cx,y:cy}=cXY(e);
-    if(dragState){
-      const cur=cToPdf(cx,cy);
-      const dx=cur.x-dragState.startPdf.x, dy=cur.y-dragState.startPdf.y;
-      if(dragState.type==="line"){
-        const o=dragState.origData;
-        mLines[dragState.idx].x0=o.x0+dx; mLines[dragState.idx].y0=o.y0+dy;
-        mLines[dragState.idx].x1=o.x1+dx; mLines[dragState.idx].y1=o.y1+dy;
-      }else{
-        mPolys[dragState.idx].pts=dragState.origData.map(p=>({x:p.x+dx,y:p.y+dy}));
-      }
-      redraw();
-    }else{
-      // hover cursor
-      ws.style.cursor=hitTest(cx,cy)?"move":"default";
-    }
-    return;
-  }
-
-  if(mode==="pan"||!pageData){
-    snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;return;
-  }
-  const {x,y}=cXY(e);
-  const s=snap(x,y);
-  snapTarget=s;
-  const wsR=ws.getBoundingClientRect();
-  const scx=s.x*zoom+panX+wsR.left;
-  const scy=s.y*zoom+panY+wsR.top;
-  snapCur.style.left=scx+"px"; snapCur.style.top=scy+"px";
-  snapCur.style.display="block";
-  const col=s.t?SNAP_COLORS[s.t]:"#aaa";
-  snapCur.style.borderColor=col;
-  snapCur.style.boxShadow=`0 0 6px ${col}66`;
-  if(s.t){
-    snapLbl.textContent=SNAP_LABELS[s.t];
-    snapLbl.style.color=col;
-    snapLbl.style.left=(scx+10)+"px";
-    snapLbl.style.top=(scy-8)+"px";
-    snapLbl.style.display="block";
-  }else{
-    snapLbl.style.display="none";
-  }
-  redraw();
-});
-ws.addEventListener("mouseup",()=>{
-  if(dragState){pushUndo();saveCurrentPage();}
-  isPan=false;
-  dragState=null;
-  ws.style.cursor=spaceDown?"grab":mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
-});
-ws.addEventListener("mouseleave",()=>{
-  isPan=false;dragState=null;snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;
-});
-ws.addEventListener("dblclick",e=>{
-  if(mode!=="sel")return;
-  const {x:cx,y:cy}=cXY(e);
-  const hit=hitTest(cx,cy);
-  if(!hit)return;
-  selItem=hit;
-  if(hit.type==="poly"){
-    const poly=mPolys[hit.idx];
-    openNamePanel("เปลี่ยนชื่อ",(nm,at)=>{poly.name=nm;if(at)poly.areaType=at;redraw();},
-      poly.name, true);
-  }
-});
-ws.addEventListener("wheel",e=>{
-  e.preventDefault();
-  const r=ws.getBoundingClientRect(),fx=e.clientX-r.left,fy=e.clientY-r.top;
-  const dz=e.deltaY>0?0.85:1.18,nz=Math.max(0.08,Math.min(8,zoom*dz));
-  panX=fx-(fx-panX)*(nz/zoom); panY=fy-(fy-panY)*(nz/zoom); zoom=nz; applyT();
-},{passive:false});
-
-// ── mode ───────────────────────────────────────────────
-function setMode(m){
-  mode=m; mPts=[]; snapTarget=null;
-  snapCur.style.display="none"; snapLbl.style.display="none";
-  if(m!=="calib"){calibPts=[];calibPanel.style.display="none";}
-  ["pan","sel","dist","area","calib"].forEach(k=>{
-    document.getElementById("btn-"+k)?.classList.toggle("active",m===k);
-  });
-  document.getElementById("lbl-mode").textContent=
-    {pan:"Pan ✋",sel:"↖ เลือก",dist:"วัดระยะ 📏",area:"วัดพื้นที่ ⬡",calib:"📐 สอบเทียบ"}[m]||m;
-  ws.className=(m==="pan"||m==="sel")?"":"drawing";
-  ws.style.cursor=m==="sel"?"default":m==="pan"?"grab":"crosshair";
-  if(m!=="sel"){selItem=null;dragState=null;}
-  document.getElementById("measure-result").textContent="";
-  if(m==="calib")setStatus("คลิกจุดที่ 1…");
-  redraw();
-}
-function clearMeasures(){
-  mPts=[];mLines=[];mPolys=[];calibPts=[];
-  calibPanel.style.display="none";
-  document.getElementById("measure-result").textContent="";
-  redraw();
-}
-
-// ── export ─────────────────────────────────────────────
-function buildRows(){
-  saveCurrentPage();
-  const rows=[];
-  for(const [pg,data] of Object.entries(pageStore)){
-    const scl=analyseCache[pg]?.scale?.label??data.calibScale?.label??"-";
-    for(const l of (data.lines||[])){
-      rows.push({หน้า:+pg,ประเภท:"ระยะ",ชื่อ:"",
-        ค่า:l.dist!=null?+l.dist.toFixed(4):null,
-        หน่วย:l.dist!=null?"ม.":"pt","ไร่-งาน-วา":"",scale:scl});
-    }
-    for(const p of (data.polys||[])){
-      if(!p.closed)continue;
-      rows.push({หน้า:+pg,ประเภท:"พื้นที่",ชื่อ:p.name||"",
-        ค่า:p.area!=null?+p.area.toFixed(4):null,
-        หน่วย:"ตร.ม.","ไร่-งาน-วา":toRNW(p.area),scale:scl});
-    }
-  }
-  return rows.sort((a,b)=>a.หน้า-b.หน้า);
-}
-function exportJSON(){
-  const rows=buildRows();
-  if(!rows.length){alert("ยังไม่มีข้อมูล");return;}
-  dlBlob(new Blob([JSON.stringify({measurements:rows},null,2)],
-    {type:"application/json"}),"measurements.json");
-}
-function exportCSV(){
-  const rows=buildRows();
-  if(!rows.length){alert("ยังไม่มีข้อมูล");return;}
-  const cols=["หน้า","ประเภท","ชื่อ","ค่า","หน่วย","ไร่-งาน-วา","scale"];
-  const esc=v=>{const s=String(v??"");return s.includes(",")?`"${s}"`:s;};
-  const csv="\uFEFF"+[cols.join(","),
-    ...rows.map(r=>cols.map(c=>esc(r[c])).join(","))].join("\r\n");
-  dlBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),"measurements.csv");
-}
-function dlBlob(blob,name){
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);a.download=name;a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-}
-
-// ── keyboard ───────────────────────────────────────────
-document.addEventListener("keydown",e=>{
-  if(e.key===" "&&!spaceDown&&e.target.tagName!=="INPUT"){
-    e.preventDefault();
-    spaceDown=true; preSpaceMode=mode;
-    ws.style.cursor="grab"; return;
-  }
-  if(e.target.tagName==="INPUT")return;
-  if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();undo();return;}
-  if(e.key==="ArrowRight"&&curPage<totalPages)loadPage(curPage+1);
-  if(e.key==="ArrowLeft"&&curPage>1)loadPage(curPage-1);
-  if(e.key==="Escape"){
-    setMode("pan");
-    namePanel.style.display="none";
-    ctxMenu.style.display="none";
-    closePgMgr();
-  }
-  if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){
-    pushUndo();
-    if(selItem.type==="line") mLines.splice(selItem.idx,1);
-    else mPolys.splice(selItem.idx,1);
-    selItem=null;dragState=null;redraw();
-  }
-  if(e.key==="f"||e.key==="F")fitToWindow();
-  if(e.key==="Delete"&&ctxTarget)ctxDelete();
-});
-document.addEventListener("keyup",e=>{
-  if(e.key===" "&&spaceDown){
-    spaceDown=false;
-    ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
-  }
-});
-function setStatus(t){document.getElementById("status").textContent=t;}
-window.addEventListener("resize",()=>{if(bgImg)fitToWindow();});
-
-// ── page manager ───────────────────────────────────────
-function openPageManager(){
-  if(!totalPages){alert("เปิด PDF ก่อน");return;}
-  const overlay=document.getElementById("pgmgr-overlay");
-  const grid=document.getElementById("pgmgr-grid");
-  grid.innerHTML="";
-  if(!pgmgrSel.size){for(let i=1;i<=totalPages;i++)pgmgrSel.add(i);}
-  for(let i=1;i<=totalPages;i++){
-    const cell=document.createElement("div");
-    cell.className="pgmgr-cell"+(pgmgrSel.has(i)?" sel":"");
-    cell.dataset.page=i;
-    cell.innerHTML=`<img src="/thumb/${i}" loading="lazy"><span>หน้า ${i}</span>`;
-    cell.addEventListener("click",e=>pgmgrClickCell(i,e));
-    grid.appendChild(cell);
-  }
-  pgmgrUpdateInfo();
-  overlay.classList.add("open");
-}
-function closePgMgr(){
-  document.getElementById("pgmgr-overlay").classList.remove("open");
-}
-function pgmgrClickCell(i,e){
-  if(e.shiftKey&&pgmgrLastClick!=null){
-    const lo=Math.min(pgmgrLastClick,i), hi=Math.max(pgmgrLastClick,i);
-    const allSel=[...Array(hi-lo+1)].map((_,k)=>lo+k).every(p=>pgmgrSel.has(p));
-    for(let p=lo;p<=hi;p++) allSel?pgmgrSel.delete(p):pgmgrSel.add(p);
-  }else{
-    pgmgrSel.has(i)?pgmgrSel.delete(i):pgmgrSel.add(i);
-  }
-  pgmgrLastClick=i;
-  document.querySelectorAll(".pgmgr-cell").forEach(c=>{
-    c.classList.toggle("sel",pgmgrSel.has(+c.dataset.page));
-  });
-  pgmgrUpdateInfo();
-}
-function pgmgrSelectAll(){
-  for(let i=1;i<=totalPages;i++)pgmgrSel.add(i);
-  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.add("sel"));
-  pgmgrUpdateInfo();
-}
-function pgmgrClearAll(){
-  pgmgrSel.clear();
-  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.remove("sel"));
-  pgmgrUpdateInfo();
-}
-function pgmgrUpdateInfo(){
-  document.getElementById("pgmgr-sel-info").textContent=`เลือก ${pgmgrSel.size} / ${totalPages} หน้า`;
-}
-async function pgmgrExportPDF(withAnnotations){
-  if(!pgmgrSel.size){alert("เลือกหน้าก่อน");return;}
-  const pages=[...pgmgrSel].sort((a,b)=>a-b);
-  saveCurrentPage();
-  const body={pages, pdfName:currentFileName, rotations:pageRotations};
-  if(withAnnotations) body.annotations=pageStore;
-  setStatus("กำลัง export…");
-  const r=await fetch("/export-pdf",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(!r.ok){setStatus("export ล้มเหลว");return;}
-  const blob=await r.blob();
-  const safe=currentFileName.replace(/\.pdf$/i,"");
-  dlBlob(blob,(safe||"export")+`_p${pages.join("-")}.pdf`);
-  setStatus(`✅ export ${pages.length} หน้า`);
-}
-
-// ── save / load project ────────────────────────────────
-function saveProject(){
-  if(!totalPages){alert("เปิด PDF ก่อน");return;}
-  saveCurrentPage();
-  const proj={version:1,pdfName:currentFileName,totalPages,
-              pageStore,pageRotations};
-  const safe=currentFileName.replace(/\.pdf$/i,"")||"project";
-  dlBlob(new Blob([JSON.stringify(proj,null,2)],{type:"application/json"}),safe+".bmaplan");
-  setStatus("💾 บันทึกแล้ว");
-}
-document.getElementById("proj-input").addEventListener("change",async e=>{
-  const file=e.target.files[0]; if(!file)return;
-  e.target.value="";
-  try{
-    const text=await file.text();
-    const proj=JSON.parse(text);
-    if(proj.version!==1)throw new Error("version ไม่รองรับ");
-    pageStore=proj.pageStore||{};
-    pageRotations=proj.pageRotations||{};
-    restorePage(curPage);
-    redraw();
-    setStatus("📂 โหลด "+file.name+" แล้ว");
-  }catch(err){alert("โหลดไม่ได้: "+err.message);}
-});
-</script>
-</body>
-</html>"""
 
 @app.get("/")
 def root():
-    return HTMLResponse(HTML)
+    return HTMLResponse(_load_html())
 
 if __name__=="__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")

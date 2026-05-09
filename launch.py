@@ -7,6 +7,8 @@ import threading
 import time
 import webbrowser
 import socket
+import uvicorn
+from server import app
 
 
 def _free_port(start: int = 8000) -> int:
@@ -34,8 +36,6 @@ def _wait_for_server(port: int, timeout: float = 20.0) -> bool:
 
 
 def _run_server(port: int):
-    import uvicorn
-    from server import app
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 

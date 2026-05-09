@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMA-Plan</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#090b10;--surface:#10151d;--surface2:#171f2a;--surface3:#202a36;--border:#273241;--text:#eef3f8;--text2:#a7b2bf;--text3:#687487;--blue:#0a84ff;--green:#35d07f;--red:#ff5a52;--orange:#ffb020;--yellow:#ffd766;--purple:#bf5af2;--cyan:#5ac8fa;--tag-site:#35d07f;--tag-plan:#2f8cff;--tag-elev:#bf5af2;--tag-detail:#ffb020;--sidebar-w:236px;--rightbar-w:300px;--topbar-h:48px;--bottombar-h:38px;--font-label:500;--font-action:600;--font-data:400;--text-xs:11px;--text-sm:12px;--text-base:14px;--text-lg:16px}
+html,body{height:100%;overflow:hidden}
+body{font-family:"Inter","Noto Sans Thai","Sarabun",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);font-size:13px;letter-spacing:0}
+button,input,select{font-family:inherit}button{cursor:pointer}
+#app{display:flex;flex-direction:column;height:100vh}
+#topbar{height:var(--topbar-h);background:#0f141c;border-bottom:1px solid #233044;display:grid;grid-template-columns:minmax(300px,1fr) auto minmax(260px,1fr);align-items:center;padding:0 12px;gap:10px;flex-shrink:0;z-index:100;box-shadow:0 10px 28px rgba(0,0,0,.22);overflow:visible}
+.topbar-zone{height:100%;display:flex;align-items:center;gap:8px;min-width:0}
+.topbar-zone-a{justify-content:flex-start}
+.topbar-zone-b{justify-content:center;border-left:1px solid #263242;border-right:1px solid #263242;padding:0 12px}
+.topbar-zone-c{justify-content:flex-end}
+.topbar-brand{display:flex;align-items:center;gap:9px;min-width:178px}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:850}
+.brand-copy{display:flex;flex-direction:column;gap:1px;min-width:0}
+#topbar h1{font-size:15px;font-weight:800;line-height:1.1;white-space:nowrap}
+.file-info{font-size:var(--text-xs);font-weight:var(--font-data);color:var(--text2);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar-group{display:flex;align-items:center;gap:6px;min-width:0;flex-shrink:0}
+.topbar-spacer{flex:1;min-width:10px}
+.sep{width:1px;height:26px;background:#263242;flex-shrink:0}
+#upload-btn{height:32px;display:inline-flex;align-items:center;justify-content:flex-start;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 10px;font-size:var(--text-sm);font-weight:var(--font-action);white-space:nowrap}
+#upload-btn:hover{background:#0071e3}
+#file-input{display:none}
+.tb{height:32px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 10px;font-size:var(--text-xs);font-weight:var(--font-label);transition:all .15s;white-space:nowrap}
+.tb:hover{background:var(--surface3)}.tb.active{background:var(--blue);border-color:var(--blue);color:#fff}
+.tb.danger{color:var(--red);border-color:rgba(255,69,58,.3)}.tb.danger:hover{background:rgba(255,69,58,.15)}
+.tb.ok{background:rgba(48,209,88,.15);color:var(--green);border-color:rgba(48,209,88,.3)}
+#btn-export-report{background:var(--green);border-color:rgba(53,208,127,.62);color:#06140a;font-weight:var(--font-action);padding:0 14px}
+#status{font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:var(--sidebar-w);background:#0f141c;border-right:1px solid #223044;display:flex;flex-direction:column;flex-shrink:0;transition:width .2s,opacity .2s;overflow:hidden}
+#sidebar.collapsed{width:0;border-right:none;opacity:0;pointer-events:none}
+#workspace{flex:1;position:relative;background:#0b0f14;overflow:hidden}
+#workspace::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:32px 32px;pointer-events:none}
+#empty-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;background:radial-gradient(circle at center,rgba(25,35,46,.92),rgba(10,10,12,.98));pointer-events:none}
+#empty-state.hidden{display:none}
+.empty-card{width:min(440px,80%);border:1px solid rgba(255,255,255,.1);background:rgba(26,26,30,.8);border-radius:14px;padding:22px;text-align:center;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.empty-card h3{font-size:16px;margin-bottom:8px}.empty-card p{font-size:12px;color:var(--text2);line-height:1.55}
+.scale-notice{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:130;display:none;align-items:center;gap:12px;width:min(720px,calc(100% - 48px));border:1px solid rgba(255,215,102,.72);background:rgba(46,34,9,.96);color:#ffe59b;border-radius:10px;padding:10px 12px;box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(10px)}
+.scale-notice:before{content:"⚠";width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(255,215,102,.14);border:1px solid rgba(255,215,102,.36);font-size:15px;flex-shrink:0}
+.scale-notice.open{display:flex}.scale-notice.ready{border-color:rgba(48,209,88,.36);background:rgba(6,37,18,.9);color:#b7f6c5}
+.scale-notice.ready:before{content:"✓";background:rgba(53,208,127,.13);border-color:rgba(53,208,127,.35)}
+.scale-notice.warn{border-color:rgba(255,159,10,.45);background:rgba(44,29,0,.92);color:#ffd28a}
+.scale-notice-title{font-size:13px;font-weight:850}.scale-notice-desc{font-size:12px;color:rgba(255,255,255,.74);margin-top:2px;line-height:1.35}
+.scale-notice button{height:30px;background:var(--blue);color:#fff;border:none;border-radius:7px;padding:0 12px;font-size:12px;font-weight:800;white-space:nowrap}
+#bottombar{height:var(--bottombar-h);background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:12px;flex-shrink:0;font-size:12px;z-index:100;overflow:hidden;white-space:nowrap}
+#sidebar-header{padding:14px 14px 8px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:6px}
+#sidebar-header h2{font-size:13px;font-weight:800;flex:1;color:var(--text)}
+.sidebar-mode-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:10px 14px 4px;background:#0b0f14;border:1px solid #253344;border-radius:8px;padding:3px}
+.sidebar-mode-tab{border:none;border-radius:6px;background:transparent;color:var(--text2);font-size:10px;font-weight:800;padding:6px 4px;text-transform:uppercase;letter-spacing:.3px;text-align:center}
+.sidebar-mode-tab.active{background:rgba(47,140,255,.2);box-shadow:inset 0 -2px 0 var(--blue);color:#fff}
+#search-input{width:calc(100% - 28px);background:#0b0f14;border:1px solid #253344;border-radius:8px;color:var(--text);padding:7px 9px;font-size:12px;outline:none;margin:10px 14px 8px}
+#search-input:focus{border-color:var(--blue)}
+#sidebar-content{flex:1;overflow-y:auto;padding:4px 0}
+#sidebar-content::-webkit-scrollbar{width:4px}
+#sidebar-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+#sidebar-footer{padding:8px 12px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap}
+.workflow-card{margin:8px 14px 12px;padding:12px;background:#131b26;border:1px solid #243244;border-radius:8px}
+.workflow-title{font-size:11px;font-weight:850;color:var(--text);margin-bottom:9px}
+.wf-row{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--text2);padding:6px 0}
+.wf-dot{width:8px;height:8px;border-radius:50%;background:#3a4656;box-shadow:0 0 0 3px rgba(255,255,255,.035)}
+.wf-row.done{color:var(--text)}.wf-row.done .wf-dot{background:var(--green)}
+.wf-row.warn{color:#ffd28a}.wf-row.warn .wf-dot{background:var(--orange)}
+#right-panel{width:var(--rightbar-w);background:#0f141c;border-left:1px solid #223044;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+#rp-header{padding:14px 14px 10px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:6px}
+#rp-header h2{font-size:13px;font-weight:800;flex:1;color:var(--text)}
+#rp-content{flex:1;overflow-y:auto;padding:12px 14px}
+#rp-content::-webkit-scrollbar{width:4px}
+#rp-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.rp-section{margin-bottom:14px}
+.rp-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.rp-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#0b0f14;border:1px solid #253344;border-radius:8px;padding:3px;margin-bottom:12px}
+.rp-tab{border:none;border-radius:6px;background:transparent;color:var(--text2);font-size:10px;font-weight:800;padding:6px 4px;text-transform:uppercase;letter-spacing:.3px;text-align:center}
+.rp-tab.active{background:rgba(47,140,255,.2);box-shadow:inset 0 -2px 0 var(--blue);color:#fff}
+.rp-tab.muted{color:var(--text3);background:transparent;box-shadow:none}
+.rp-layer-row{display:grid;grid-template-columns:14px minmax(0,1fr) auto auto auto;align-items:center;gap:8px;padding:8px;border-radius:8px;background:#131b26;border:1px solid rgba(255,255,255,.055);font-size:12px;margin-bottom:7px}
+.rp-layer-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-layer-dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.06)}
+.rp-layer-count{min-width:24px;text-align:right;color:var(--text3);font-size:11px;font-weight:750}
+.rp-icon-btn{background:#0b0f14;color:var(--text);border:1px solid #273544;border-radius:6px;min-width:30px;height:26px;font-size:11px}
+.rp-icon-btn.off{opacity:.45}.rp-icon-btn.locked{color:var(--orange);border-color:rgba(255,149,0,.45);background:rgba(255,149,0,.12)}
+.rp-compat-section{border-top:1px solid rgba(255,255,255,.06);padding-top:10px}
+.rp-compat-section .rp-title{color:#8b97a8}
+.rp-compat-note{font-size:11px;color:var(--text3);line-height:1.4;margin:-2px 0 12px}
+.rp-group{margin:7px 0 4px;font-size:11px;font-weight:700;color:var(--text2)}
+.rp-obj-row{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:6px;padding:6px;border-radius:6px;background:var(--surface2);margin-bottom:3px;font-size:11px;cursor:pointer;border:1px solid transparent}
+.rp-obj-row:hover{background:var(--surface3)}.rp-obj-row.sel{background:rgba(10,132,255,.18);border-color:var(--blue);color:#fff}
+.rp-obj-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rp-obj-meta{color:var(--text2);font-size:10px;white-space:nowrap}
+.rp-empty{font-size:12px;color:var(--text3);line-height:1.45}
+.rp-prop-grid{display:grid;grid-template-columns:88px 1fr;gap:6px 8px;font-size:12px;align-items:center}
+.rp-prop-grid label{color:var(--text2);font-size:11px}
+.rp-prop-grid input,.rp-prop-grid select{min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:12px}
+.rp-metric{padding:6px 8px;background:var(--surface2);border-radius:6px;font-size:12px;display:flex;justify-content:space-between;margin-top:4px}
+.rp-metric span:first-child{color:var(--text2)}
+.rp-side-list{display:grid;gap:8px;margin-top:8px}
+.rp-side-card{background:var(--surface2);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:8px}
+.rp-side-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;font-weight:700;color:var(--text2)}
+.rp-side-fields{display:grid;grid-template-columns:1fr;gap:6px}
+.rp-side-fields input,.rp-side-fields select{width:100%;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 6px;font-size:12px}
+.rp-inline-actions{display:flex;gap:6px;margin-top:8px}.rp-inline-actions .tb{flex:1}
+.north-summary{background:rgba(90,200,250,.08);border:1px solid rgba(90,200,250,.24);border-radius:8px;padding:8px;font-size:12px;line-height:1.5;color:var(--text2)}
+.page-group{margin-bottom:2px}
+.group-header{display:flex;align-items:center;gap:5px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:750;color:var(--text2);user-select:none}
+.group-header:hover{background:var(--surface2)}
+.group-header .arrow{font-size:8px;transition:transform .15s}
+.group-header .arrow.open{transform:rotate(90deg)}
+.group-header .count{font-size:10px;color:var(--text3);margin-left:auto}
+.group-body{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:5px 14px 12px}
+.group-body.hidden{display:none}
+.pg-thumb{width:100%;cursor:pointer;border-radius:7px;overflow:hidden;position:relative;border:2px solid transparent;transition:all .15s;background:#151d28}
+.pg-thumb:hover{border-color:var(--border);transform:scale(1.05)}
+.pg-thumb.active{border-color:var(--blue);background:rgba(10,132,255,.15)}
+.pg-thumb.hidden{opacity:.4;filter:grayscale(1)}
+.pg-thumb img{width:100%;aspect-ratio:1.414;object-fit:cover;display:block;pointer-events:none}
+.pg-thumb .pg-label{font-size:9px;color:var(--text2);padding:3px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pg-thumb .pg-tag{position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%}
+.pg-thumb .pg-tag.site{background:var(--tag-site)}.pg-thumb .pg-tag.plan{background:var(--tag-plan)}
+.pg-thumb .pg-tag.elev{background:var(--tag-elev)}.pg-thumb .pg-tag.section{background:#bf5af2}.pg-thumb .pg-tag.detail{background:var(--tag-detail)}.pg-thumb .pg-tag.schedule{background:#64d2ff}.pg-thumb .pg-tag.other{background:#8e8e93}
+.pg-thumb .pg-hide{position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:rgba(255,69,58,.2);color:var(--red);font-size:10px;line-height:16px;text-align:center;opacity:0;transition:opacity .15s;border:none;cursor:pointer}
+.pg-thumb:hover .pg-hide{opacity:1}
+.pg-thumb .pg-restore{position:absolute;top:1px;right:1px;width:16px;height:16px;border-radius:50%;background:rgba(48,209,88,.2);color:var(--green);font-size:10px;line-height:16px;text-align:center;border:none;cursor:pointer}
+.pg-thumb .pg-dot{position:absolute;bottom:18px;right:2px;font-size:7px;color:var(--blue)}
+#cc{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;box-shadow:0 18px 60px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.12);background:#fff}
+canvas{display:block}
+#workspace.drawing{cursor:crosshair}#workspace.panning{cursor:grab}
+#snap-cur{position:fixed;width:14px;height:14px;border:2px solid var(--yellow);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;display:none;z-index:200;box-shadow:0 0 6px rgba(255,214,10,.5)}
+#snap-lbl{position:fixed;font-size:9px;font-weight:700;pointer-events:none;display:none;z-index:201;background:rgba(0,0,0,.7);padding:1px 4px;border-radius:3px}
+.bb-item{color:var(--text2);flex-shrink:0}.bb-val{color:var(--text);font-weight:600}.bb-measure{color:var(--yellow);font-weight:600;margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#float-toolbar{position:fixed;top:58px;left:calc(var(--sidebar-w) + ((100vw - var(--sidebar-w) - var(--rightbar-w))/2));transform:translateX(-50%);max-width:calc(100vw - var(--sidebar-w) - var(--rightbar-w) - 24px);background:rgba(16,21,29,.96);border:1px solid #2a3747;border-radius:10px;padding:4px;display:flex;align-items:center;gap:4px;z-index:150;box-shadow:0 12px 32px rgba(0,0,0,.42);overflow:visible;backdrop-filter:blur(12px)}
+.ft-group{display:flex;align-items:center;gap:4px;min-width:0;flex-shrink:0}
+.ft-btn{height:34px;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:transparent;color:var(--text);border:none;border-radius:8px;padding:0 7px;font-size:var(--text-xs);font-weight:var(--font-label);transition:all .1s;white-space:nowrap}
+.ft-icon{font-size:14px;line-height:1;font-weight:var(--font-action)}
+.ft-label{font-size:var(--text-xs);font-weight:var(--font-label)}
+.ft-btn:hover{background:var(--surface2)}.ft-btn.active{background:var(--blue);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}
+.ft-btn.danger{color:var(--red)}.ft-btn.ok{color:var(--green)}
+.ft-sep{width:1px;height:26px;background:#2a3544;margin:0 2px;flex-shrink:0}
+.toolbar-more-wrap{position:relative;flex-shrink:0}
+#toolbar-more-btn{background:var(--surface2);border:1px solid var(--border);font-weight:var(--font-action)}
+#toolbar-more-btn.active{border-color:var(--blue);background:rgba(10,132,255,.18);color:#fff}
+#toolbar-more-menu{position:absolute;top:calc(100% + 8px);right:0;width:282px;background:rgba(16,21,29,.98);border:1px solid #2a3747;border-radius:10px;padding:9px;display:none;grid-template-columns:1fr;gap:8px;box-shadow:0 14px 40px rgba(0,0,0,.58);backdrop-filter:blur(12px)}
+#toolbar-more-menu.open{display:grid}
+.more-section{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.more-section:last-child{border-bottom:none;padding-bottom:0}
+.more-section-title{grid-column:1/-1;font-size:10px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.4px}
+.more-section .ft-btn,.more-section select.ft-btn{width:100%;justify-content:flex-start;background:var(--surface2);border:1px solid rgba(255,255,255,.06)}
+.more-section select.ft-btn{color:var(--text);outline:none}
+.more-section .ft-btn:hover,.more-section select.ft-btn:hover{background:var(--surface3)}
+.more-wide{grid-column:1/-1}
+@media(max-width:1440px){.ft-btn{padding-left:6px;padding-right:6px}.ft-label.optional{display:none}#active-layer-select{max-width:116px}.topbar-save,#status{display:none}.file-info{max-width:150px}}
+@media(max-width:1280px){#float-toolbar{max-width:calc(100vw - var(--sidebar-w) - var(--rightbar-w) - 18px)}.ft-label{display:none}.ft-btn{padding-left:9px;padding-right:9px}#active-layer-select{max-width:104px;font-size:11px}.file-info{display:none}}
+.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px;z-index:500;display:none;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.6)}
+.panel h3{font-size:13px;margin-bottom:12px}.panel label{font-size:12px;color:var(--text2);display:block;margin-bottom:6px}
+.panel-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:14px;padding:7px 10px;outline:none;margin-bottom:14px}
+.panel-input:focus{border-color:var(--blue)}.panel-row{display:flex;gap:8px}
+.btn-ok{flex:1;background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px;font-size:12px;font-weight:600}
+.btn-ok:hover{background:#0071e3}
+.btn-cancel{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 14px;font-size:12px}
+.edge-help{font-size:11px;color:var(--text2);line-height:1.45;margin-bottom:10px}
+.edge-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px}
+.edge-btn{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 8px;font-size:12px;text-align:left}
+.edge-btn:hover{background:var(--surface3)}.edge-btn.sel{border-color:var(--blue);background:rgba(10,132,255,.18)}
+.edge-meta{font-size:11px;color:var(--yellow);margin-bottom:10px;min-height:16px}
+#ctx-menu{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:9px;z-index:600;display:none;min-width:180px;box-shadow:0 4px 20px rgba(0,0,0,.6);overflow:hidden}
+.ctx-item{padding:9px 14px;font-size:12px;cursor:pointer;color:var(--text)}.ctx-item:hover{background:var(--surface2)}.ctx-item.del{color:var(--red)}
+.ctx-sep{height:1px;background:var(--border)}.ctx-color-row{padding:7px 14px;display:flex;align-items:center;gap:6px}
+#obj-picker{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:10px;z-index:700;display:none;min-width:220px;max-width:290px;box-shadow:0 8px 30px rgba(0,0,0,.7);overflow:hidden}
+#obj-picker-hdr{padding:5px 12px;font-size:10px;color:var(--text3);border-bottom:1px solid var(--border);letter-spacing:.5px;text-transform:uppercase}
+.opkr-row{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border)}
+.opkr-row:last-child{border-bottom:none}.opkr-row:hover{background:var(--surface2)}
+.opkr-icon{width:18px;text-align:center;flex-shrink:0}.opkr-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opkr-area{font-size:11px;color:var(--text2);white-space:nowrap;flex-shrink:0}
+.opkr-type{font-size:10px;color:var(--text3);white-space:nowrap}
+.ft-btn.lv-off{opacity:0.4}
+#draw-bar{display:none;position:fixed;bottom:52px;left:50%;transform:translateX(-50%);flex-direction:row;gap:5px;align-items:center;background:rgba(28,28,30,0.92);border:1px solid #48484a;border-radius:10px;padding:4px 10px;z-index:500;pointer-events:auto;backdrop-filter:blur(8px);}
+#draw-bar button{background:#3a3a3c;border:1px solid #48484a;color:var(--text);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:inherit;}
+#draw-bar button:hover{background:#48484a;}
+#draw-bar button:disabled{opacity:0.3;cursor:default;}
+#draw-bar #dbar-finish{color:var(--green);border-color:var(--green);}
+#draw-bar #dbar-cancel{color:var(--red);border-color:var(--red);}
+#dbar-pts{font-size:11px;color:var(--text2);padding-left:4px;}
+.ft-btn.ll-on{background:rgba(255,159,10,0.2) !important;color:#ff9f0a;}
+#setup-overlay{position:fixed;inset:0;background:#0b0f14;z-index:500;display:none;flex-direction:column;color:var(--text)}
+#setup-overlay.open{display:flex}
+#setup-hdr{height:56px;background:#111820;padding:0 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #263241;flex-shrink:0}
+.setup-brand{display:flex;align-items:center;gap:9px;min-width:190px;font-size:13px;font-weight:800;letter-spacing:0;color:#f5f7fb}
+.setup-mark{width:26px;height:26px;border-radius:7px;background:#1d8cff;color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
+#setup-hdr h2{font-size:15px;font-weight:750;flex:1;color:#f3f6fb}
+#setup-hdr .pdf-name{font-size:12px;color:#9ba8b7;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.setup-save-btn{height:34px;background:#172331;border:1px solid #2e3d4f;color:#d8e1ec;border-radius:7px;padding:0 13px;font-size:12px;font-weight:650;cursor:pointer}
+.setup-save-btn:hover{background:#203044;border-color:#3d516a}
+#setup-start-btn{height:36px;background:var(--green);color:#06140a;border:none;border-radius:7px;padding:0 20px;font-size:13px;font-weight:800;cursor:pointer}
+#setup-start-btn:hover{background:#25a244}
+#setup-body{display:flex;flex:1;min-height:0;overflow:hidden;background:#0b0f14}
+#proj-form-panel{width:318px;min-width:318px;background:#111820;border-right:1px solid #263241;padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.setup-section{background:#141c26;border:1px solid #243244;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.setup-section h3{font-size:12px;font-weight:800;color:#dce6f2;margin:0 0 2px;display:flex;align-items:center;gap:7px}
+.pf-row{display:flex;flex-direction:column;gap:6px}.pf-row label{font-size:11px;color:#9ba8b7}
+.pf-row input,.pf-row select{height:34px;background:#0c1219;border:1px solid #2a3a4c;border-radius:6px;color:#edf3fb;padding:0 9px;font-size:12px;width:100%;outline:none}
+.pf-row input:focus,.pf-row select:focus{border-color:#2f8cff;box-shadow:0 0 0 2px rgba(47,140,255,.16)}
+.pf-row select option{background:#111820}
+.setup-auto-btn{height:36px;background:#1769d6;border:1px solid #2f8cff;color:#fff;border-radius:7px;font-size:12px;font-weight:750;cursor:pointer;margin-top:2px}
+.setup-auto-btn:hover{background:#1f78ee}
+#tag-grid-wrap{flex:1;min-width:0;overflow-y:auto;padding:18px 20px 14px;display:flex;flex-direction:column;gap:12px}
+.setup-main-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.setup-main-title h3{font-size:18px;font-weight:800;margin:0 0 4px;color:#f3f6fb}
+.setup-main-title p{font-size:12px;color:#9ba8b7;margin:0}
+#setup-summary-chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.setup-chip{height:34px;background:#131c27;border:1px solid #263648;color:#dce6f2;border-radius:8px;padding:0 10px;display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer}
+.setup-chip b{font-size:13px;color:#fff}
+.setup-chip.active{border-color:#2f8cff;background:#162b45;color:#fff}
+.setup-chip.muted b{color:#9ba8b7}
+.setup-tools{display:flex;align-items:center;gap:10px}
+#setup-page-search{height:36px;flex:1;background:#111820;border:1px solid #263648;border-radius:7px;color:#edf3fb;padding:0 12px;font-size:12px;outline:none}
+#setup-page-search:focus{border-color:#2f8cff;box-shadow:0 0 0 2px rgba(47,140,255,.14)}
+#setup-filter-btn{height:36px;background:#172331;border:1px solid #2e3d4f;color:#d8e1ec;border-radius:7px;padding:0 13px;font-size:12px;font-weight:650;cursor:pointer;white-space:nowrap}
+#setup-filter-btn:hover{background:#203044}
+#tag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;align-content:start}
+.tag-cell{background:#121a24;border:1px solid #263648;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:9px;position:relative;min-width:0}
+.tag-cell:hover{border-color:#38506a}
+.tag-cell.selected{border-color:#2f8cff;box-shadow:0 0 0 2px rgba(47,140,255,.14)}
+.tag-cell img{width:100%;border-radius:6px;background:#202b37;aspect-ratio:1.414;object-fit:contain;border:1px solid #233143}
+.tag-cell .tc-lbl{font-size:11px;color:#9ba8b7;text-align:center}
+.tag-cell input,.tag-cell select{width:100%;height:32px;background:#0c1219;border:1px solid #2a3a4c;border-radius:6px;color:#edf3fb;padding:0 8px;font-size:12px;outline:none}
+.tag-cell input:focus,.tag-cell select:focus{border-color:#2f8cff;box-shadow:0 0 0 2px rgba(47,140,255,.14)}
+.tag-cell select{padding-left:26px}
+.tag-cell.excluded{opacity:.48;filter:grayscale(.7)}
+.tc-cat{position:relative}
+.tc-dot{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;background:#6b7785;z-index:1}
+.tc-dot.site{background:#30d158}.tc-dot.plan{background:#2f8cff}.tc-dot.elev{background:#ffcc00}.tc-dot.section{background:#bf5af2}.tc-dot.detail{background:#ff9f0a}.tc-dot.schedule{background:#64d2ff}.tc-dot.other{background:#8e8e93}
+.tag-cell .tc-del-btn{position:absolute;top:16px;right:16px;width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.18);background:rgba(9,14,20,.72);color:#ffb0aa;font-size:14px;line-height:20px;text-align:center;cursor:pointer;padding:0;z-index:2}
+.tag-cell .tc-del-btn:hover{background:rgba(255,59,48,.22);border-color:rgba(255,59,48,.45)}
+.tag-cell .tc-del-btn.on{background:var(--red);border-color:var(--red);color:#fff}
+.setup-empty{border:1px dashed #314155;border-radius:8px;color:#9ba8b7;padding:24px;text-align:center;font-size:13px}
+#setup-footer{height:34px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #263241;background:#111820;color:#9ba8b7;font-size:11px;padding:0 18px;flex-shrink:0}
+#check-panel{position:fixed;top:var(--topbar-h);right:0;bottom:0;width:480px;background:var(--bg);border-left:1px solid var(--border);display:none;flex-direction:column;z-index:200;overflow-y:auto}
+#check-panel.open{display:flex}
+#check-hdr{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px}
+#check-hdr h3{margin:0;flex:1;font-size:14px}
+#check-hdr button{background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:4px 8px}
+#check-hdr button:hover{color:var(--text)}
+#check-body{flex:1;overflow-y:auto;padding-bottom:24px}
+.check-summary{display:flex;gap:16px;padding:12px 16px;border-bottom:1px solid var(--surface);font-size:13px}
+.cs-pass{color:var(--green);font-weight:600}.cs-fail{color:var(--red);font-weight:600}.cs-unk{color:var(--text2)}
+.check-table{width:100%;border-collapse:collapse;font-size:12px}
+.check-table th{background:var(--surface);padding:6px 8px;text-align:left;color:var(--text2);font-weight:500}
+.check-table td{padding:7px 8px;border-bottom:1px solid var(--surface);vertical-align:top;color:var(--text)}
+.check-table tr.fail td{background:#2a1a1a}.check-table tr.pass td{background:#1a2a1a}.check-table tr.unk td{background:var(--bg)}
+.check-table td small{color:var(--text2);font-size:11px}.result-icon{text-align:center;font-size:15px;width:28px}
+.check-data{padding:12px 16px;border-top:1px solid var(--border)}
+.check-data h4{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px}
+.cd-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--surface);color:var(--text)}
+.cd-row span:first-child{color:var(--text2)}
+.cd-warn{background:#2a2200;border-radius:6px;padding:8px 12px;margin:12px 16px;font-size:12px;color:var(--yellow)}
+#export-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;z-index:500;display:none;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#export-panel.open{display:block}
+#export-panel h3{font-size:14px;font-weight:700;margin-bottom:16px}
+.export-section{margin-bottom:16px}.export-section h4{font-size:12px;color:var(--text2);margin-bottom:8px}
+.export-btn{width:100%;background:var(--blue);color:#fff;border:none;border-radius:7px;padding:8px;font-size:12px;font-weight:600;margin-top:6px}
+.export-btn:hover{background:#0071e3}.export-btn.green{background:var(--green);color:#000}
+.export-btn.green:hover{background:#25a244}
+.export-close{position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text2);font-size:18px;cursor:pointer}
+#scale-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;background:rgba(255,69,58,.2);color:var(--red);border:1px solid rgba(255,69,58,.3)}
+#scale-badge.ok{background:rgba(48,209,88,.15);color:var(--green);border-color:rgba(48,209,88,.3)}
+#scale-badge.warn{background:rgba(255,159,10,.15);color:var(--orange);border-color:rgba(255,159,10,.35)}
+#scale-badge.manual{background:rgba(10,132,255,.15);color:var(--cyan);border-color:rgba(10,132,255,.35)}
+#sidebar-toggle{background:transparent;border:none;color:var(--text2);font-size:16px;padding:2px 6px;border-radius:4px}
+#sidebar-toggle:hover{background:var(--surface2);color:var(--text)}
+#quick-tag-bar{padding:4px 8px;display:flex;gap:3px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.qt-btn{font-size:10px;padding:2px 6px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;transition:all .1s}
+.qt-btn:hover{background:var(--surface2)}
+.qt-btn[data-tag="site"]{border-color:rgba(48,209,88,.3);color:var(--tag-site)}
+.qt-btn[data-tag="site"]:hover,.qt-btn[data-tag="site"].active{background:rgba(48,209,88,.15)}
+.qt-btn[data-tag="plan"]{border-color:rgba(10,132,255,.3);color:var(--tag-plan)}
+.qt-btn[data-tag="plan"]:hover,.qt-btn[data-tag="plan"].active{background:rgba(10,132,255,.15)}
+.qt-btn[data-tag="elev"]{border-color:rgba(191,90,242,.3);color:var(--tag-elev)}
+.qt-btn[data-tag="elev"]:hover,.qt-btn[data-tag="elev"].active{background:rgba(191,90,242,.15)}
+.qt-btn[data-tag="detail"]{border-color:rgba(255,149,0,.3);color:var(--tag-detail)}
+.qt-btn[data-tag="detail"]:hover,.qt-btn[data-tag="detail"].active{background:rgba(255,149,0,.15)}
+.qt-btn.hide{border-color:rgba(255,69,58,.3);color:var(--red)}.qt-btn.hide:hover{background:rgba(255,69,58,.15)}
+.group-header[data-group="site"]{color:var(--tag-site)}.group-header[data-group="plan"]{color:var(--tag-plan)}
+.group-header[data-group="elev"]{color:var(--tag-elev)}.group-header[data-group="detail"]{color:var(--tag-detail)}
+.group-header[data-group="none"]{color:var(--text3)}.group-header[data-group="hidden"]{color:var(--red)}
+.atype-row{display:flex;gap:8px;margin-bottom:14px}
+.atype-btn{flex:1;padding:6px 4px;font-size:12px;font-weight:600;cursor:pointer;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);text-align:center}
+.atype-btn.sel{background:rgba(10,132,255,.18);border-color:var(--blue);color:var(--blue)}
+#snap-bar{display:flex;align-items:center;gap:3px}
+#snap-bar span{font-size:10px;color:var(--text3);margin-right:2px}
+.sn-btn{border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:2px 7px;font-size:10px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.05);color:var(--text3);transition:all .15s}
+.sn-btn:hover{background:rgba(255,255,255,.1)}.sn-btn.on{color:#fff}
+.sn-ep.on{background:#ffd60a33;border-color:#ffd60a;color:#ffd60a}
+.sn-mp.on{background:#ff950033;border-color:#ff9500;color:#ff9500}
+.sn-ct.on{background:#0a84ff33;border-color:#0a84ff;color:#0a84ff}
+.sn-nl.on{background:#30d15833;border-color:#30d158;color:#30d158}
+.sn-ix.on{background:#ff453a33;border-color:#ff453a;color:#ff453a}
+.sn-off.on{background:#48484a;border-color:#636366;color:#e5e5e7}
+#color-bar{display:flex;align-items:center;gap:4px}
+#color-bar span{font-size:10px;color:var(--text3)}
+#inp-color{width:24px;height:22px;border:none;padding:0;cursor:pointer;border-radius:4px;background:none}
+#inp-opacity{width:50px;accent-color:var(--blue);cursor:pointer}
+#opacity-val{font-size:10px;color:var(--text);min-width:24px}
+#zoom-bar{display:flex;align-items:center;gap:3px}
+#zoom-val{font-size:10px;color:var(--text);min-width:30px;text-align:center}
+#pgmgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:700;display:none;align-items:center;justify-content:center}
+#pgmgr-overlay.open{display:flex}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="topbar-zone topbar-zone-a">
+      <div class="topbar-brand">
+        <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+        <span class="brand-mark">BM</span>
+        <div class="brand-copy">
+          <h1>BMA-Plan</h1>
+          <span class="file-info" id="file-info">ยังไม่มีไฟล์</span>
+        </div>
+      </div>
+      <label id="upload-btn">เปิด PDF<input id="file-input" type="file" accept=".pdf"></label>
+      <label class="tb" id="top-open-project" style="cursor:pointer">เปิด Project<input id="proj-input" type="file" accept=".bmaplan" style="display:none"></label>
+      <button class="tb" id="btn-sample-pdf" onclick="openSamplePdf()">ตัวอย่าง</button>
+      <button class="tb" id="btn-scale-current" title="Set Scale Current Page" onclick="if(totalPages)setMode('calib');else alert('เปิด PDF ก่อน')">Set Scale</button>
+      <button class="tb" id="btn-setup" title="Page Setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">Page Setup</button>
+    </div>
+    <div class="topbar-zone topbar-zone-b">
+      <button class="tb" id="btn-prev" onclick="const p=getPrevPage(curPage);if(p)loadPage(p)">◀</button>
+      <span id="page-lbl" style="font-size:12px;color:var(--text);min-width:54px;text-align:center;font-weight:600">— / —</span>
+      <button class="tb" id="btn-next" onclick="const n=getNextPage(curPage);if(n)loadPage(n)">▶</button>
+      <div class="topbar-group" id="zoom-bar">
+        <button class="tb" onclick="adjustZoom(1.3)">+</button>
+        <span id="zoom-val">100%</span>
+        <button class="tb" onclick="adjustZoom(1/1.3)">−</button>
+        <button class="tb" onclick="fitToWindow()">Fit</button>
+      </div>
+      <button class="tb" onclick="rotatePage(-90)">↺</button>
+      <button class="tb" onclick="rotatePage(90)">↻</button>
+      <span id="rot-badge" style="font-size:11px;color:var(--text2);display:none"></span>
+    </div>
+    <div class="topbar-zone topbar-zone-c">
+      <span id="scale-badge">ยังไม่มีไฟล์</span>
+      <button class="tb topbar-save" onclick="saveProject()">Save</button>
+      <button class="tb" id="btn-report" onclick="openCheckPanel()">สรุป</button>
+      <button class="tb" id="btn-export-report" onclick="openExportPanel()">Export รายงาน</button>
+      <span id="status"></span>
+    </div>
+  </div>
+  <div id="main">
+    <div id="sidebar">
+      <div id="sidebar-header"><h2>Sheets</h2><span id="sidebar-count" style="font-size:10px;color:var(--text3)"></span></div>
+      <div class="sidebar-mode-tabs" aria-label="Left panel sections">
+        <div class="sidebar-mode-tab active">Sheets</div>
+        <div class="sidebar-mode-tab">Objects</div>
+        <div class="sidebar-mode-tab">Properties</div>
+      </div>
+      <input type="text" id="search-input" placeholder="🔍 ค้นหาหน้า..." oninput="filterPages(this.value)">
+      <div id="quick-tag-bar">
+        <button class="qt-btn" data-tag="site" onclick="setQuickTag('site')">🏗 ผังบริเวณ</button>
+        <button class="qt-btn" data-tag="plan" onclick="setQuickTag('plan')">📐 แปลนพื้น</button>
+        <button class="qt-btn" data-tag="elev" onclick="setQuickTag('elev')">📏 รูปด้าน</button>
+        <button class="qt-btn" data-tag="detail" onclick="setQuickTag('detail')">🔍 รายละเอียด</button>
+        <button class="qt-btn hide" onclick="hideSelectedPages()">🚫 ซ่อน</button>
+      </div>
+      <div class="workflow-card" id="workflow-card">
+        <div class="workflow-title">Workflow</div>
+        <div class="wf-row" id="wf-open"><span class="wf-dot"></span><span>Open PDF</span></div>
+        <div class="wf-row" id="wf-scale"><span class="wf-dot"></span><span>Set Scale</span></div>
+        <div class="wf-row" id="wf-page-setup"><span class="wf-dot"></span><span>Page Setup</span></div>
+        <div class="wf-row" id="wf-measure"><span class="wf-dot"></span><span>Measure</span></div>
+        <div class="wf-row" id="wf-review"><span class="wf-dot"></span><span>Review</span></div>
+        <div class="wf-row" id="wf-export"><span class="wf-dot"></span><span>Export</span></div>
+      </div>
+      <div id="sidebar-content"></div>
+      <div id="sidebar-footer">
+        <button class="tb" style="flex:1;font-size:10px" onclick="applyAutoNames()">🔄 ตั้งชื่ออัตโนมัติ</button>
+        <button class="tb" style="flex:1;font-size:10px" onclick="expandAllGroups()">▼ ทั้งหมด</button>
+      </div>
+    </div>
+    <div id="workspace">
+      <div id="empty-state"><div class="empty-card"><h3>เปิด PDF เพื่อเริ่มวัด</h3><p>Workflow: Open PDF → Set Scale → Page Setup → Measure → Review → Export</p></div></div>
+      <div id="scale-notice" class="scale-notice"><div style="flex:1"><div class="scale-notice-title" id="scale-notice-title">ยังไม่ได้ตั้ง Scale</div><div class="scale-notice-desc" id="scale-notice-desc">ค่าพื้นที่ยังใช้จริงไม่ได้</div></div><button onclick="setMode('calib')">ตั้ง Scale</button></div>
+      <div id="cc"><canvas id="canvas"></canvas></div>
+    </div>
+    <aside id="right-panel">
+      <div id="rp-header"><h2>Layers</h2></div>
+      <div id="rp-content"><div class="rp-empty">เปิด PDF แล้วเลือกหรือวาด object เพื่อดูรายละเอียด</div></div>
+    </aside>
+  </div>
+  <div id="bottombar">
+    <span class="bb-item">Tool: <span class="bb-val" id="lbl-mode">Pan</span></span>
+    <span class="bb-item">Scale: <span class="bb-val" id="lbl-scale">—</span></span>
+    <span class="bb-item">Objects: <span class="bb-val" id="lbl-objects">0</span></span>
+    <span class="bb-item">Warnings: <span class="bb-val" id="lbl-warnings">0</span></span>
+    <span class="bb-item">Layer: <span class="bb-val" id="lbl-layer">Layer: พื้นที่ย่อย</span></span>
+    <div id="snap-bar">
+      <span>Snap:</span>
+      <button class="sn-btn sn-ep on" id="sn-ep" onclick="toggleSnap('ep')">EP</button>
+      <button class="sn-btn sn-mp on" id="sn-mp" onclick="toggleSnap('mp')">MP</button>
+      <button class="sn-btn sn-ct on" id="sn-ct" onclick="toggleSnap('ct')">CT</button>
+      <button class="sn-btn sn-nl" id="sn-nl" onclick="toggleSnap('nl')">NL</button>
+      <button class="sn-btn sn-ix" id="sn-ix" onclick="toggleSnap('ix')">IX</button>
+      <button class="sn-btn sn-off" id="sn-off" onclick="toggleSnap('off')">—</button>
+    </div>
+    <span class="bb-item">Snap: <span class="bb-val" id="lbl-snaps">—</span></span>
+    <div id="color-bar">
+      <span>สี</span>
+      <input type="color" id="inp-color" value="#30d158" oninput="applyColor(this.value)">
+      <input type="range" id="inp-opacity" min="10" max="100" value="85" oninput="applyOpacity(+this.value)">
+      <span id="opacity-val">85%</span>
+    </div>
+    <span class="bb-item">Save: <span class="bb-val" id="lbl-save-state">Manual save required</span></span>
+    <span class="bb-item">Page: <span class="bb-val" id="bb-page-name" style="color:var(--cyan)">—</span></span>
+    <span class="bb-item" id="page-summary">ยังไม่มีรายการพื้นที่</span>
+    <span class="bb-measure" id="measure-result"></span>
+  </div>
+</div>
+<div id="float-toolbar">
+  <div class="ft-group" id="toolbar-primary">
+    <button class="ft-btn active" id="btn-pan" onclick="setMode('pan')"><span class="ft-icon">✋</span><span class="ft-label optional">Pan</span></button>
+    <button class="ft-btn" id="btn-sel" onclick="setMode('sel')"><span class="ft-icon">↖</span><span class="ft-label">เลือก</span></button>
+    <div class="ft-sep"></div>
+    <button class="ft-btn" id="btn-area" onclick="activateAreaTool('room')"><span class="ft-icon">⬡</span><span class="ft-label">พื้นที่</span></button>
+    <button class="ft-btn" id="btn-opening" onclick="toggleOpening()"><span class="ft-icon">□</span><span class="ft-label">ช่องเปิด</span></button>
+    <button class="ft-btn" id="btn-parcel-boundary" onclick="activateAreaTool('land')"><span class="ft-icon">▱</span><span class="ft-label">ที่ดิน</span></button>
+    <div class="ft-sep"></div>
+    <button class="ft-btn" id="btn-ref" onclick="setMode('ref')"><span class="ft-icon">⌁</span><span class="ft-label">อ้างอิง</span></button>
+    <button class="ft-btn" id="btn-dist" onclick="setMode('dist')"><span class="ft-icon">↔</span><span class="ft-label">ระยะ</span></button>
+    <button class="ft-btn" id="btn-calib" onclick="setMode('calib')"><span class="ft-icon">∕</span><span class="ft-label">Scale</span></button>
+    <div class="ft-sep"></div>
+    <button class="ft-btn" id="btn-north" onclick="setMode('north')"><span class="ft-icon">↑N</span><span class="ft-label">เหนือ</span></button>
+  </div>
+  <div class="ft-sep"></div>
+  <div class="ft-group" id="toolbar-layer">
+    <select id="active-layer-select" class="ft-btn" style="max-width:132px" onchange="setActiveLayer(this.value)" title="เลือก layer สำหรับ object ใหม่">
+      <option value="sub_area">Layer: พื้นที่ย่อย</option>
+      <option value="base_area">Layer: พื้นที่หลัก</option>
+      <option value="deduction">Layer: ช่องเปิด</option>
+      <option value="reference_geometry">Layer: อ้างอิง</option>
+    </select>
+  </div>
+  <div class="ft-sep"></div>
+  <div class="ft-group" id="toolbar-edit">
+    <button class="ft-btn" id="btn-undo" onclick="undo()"><span class="ft-icon">↶</span><span class="ft-label optional">Undo</span></button>
+    <button class="ft-btn" id="btn-redo" onclick="redo()"><span class="ft-icon">↷</span><span class="ft-label optional">Redo</span></button>
+    <button class="ft-btn danger" id="btn-delete-selected" onclick="deleteSelectedObject()"><span class="ft-icon">⌫</span><span class="ft-label optional">ลบ</span></button>
+  </div>
+  <div class="ft-sep"></div>
+  <div class="toolbar-more-wrap" id="toolbar-more">
+    <button class="ft-btn" id="toolbar-more-btn" onclick="toggleToolbarMore(event)">เพิ่มเติม ▾</button>
+    <div id="toolbar-more-menu" aria-label="เครื่องมือเพิ่มเติม">
+      <div class="more-section">
+        <div class="more-section-title">เครื่องมือเพิ่มเติม</div>
+        <button class="ft-btn" id="btn-path" onclick="setMode('path')">〽 ระยะต่อเนื่อง</button>
+        <button class="ft-btn" id="btn-refdist" onclick="toggleRefDistance()">↔ ถึง Ref</button>
+        <button class="ft-btn" id="btn-perp" onclick="togglePerp()">⊥ ตั้งฉาก</button>
+        <select id="ref-type" class="ft-btn" onchange="curRefType=this.value">
+          <option value="road">ถนน</option><option value="canal">คลอง</option><option value="property">เขตที่ดิน</option><option value="wall">ผนัง</option><option value="grid">แกน</option><option value="custom">อื่นๆ</option>
+        </select>
+        <button class="ft-btn" id="btn-parking" onclick="setMode('parking')">🚗 ที่จอด</button>
+        <select id="parking-type" class="ft-btn" onchange="curParkingType=this.value">
+          <option value="car">รถยนต์</option><option value="ev">EV</option><option value="disabled">ผู้พิการ</option><option value="motorcycle">มอเตอร์ไซค์</option><option value="service">บริการ</option>
+        </select>
+        <button class="ft-btn" id="btn-ortho" onclick="toggleOrtho()" title="ล็อก 0°/90° ตลอด (เปิด = ortho mode)">⊖ ตั้งฉาก</button>
+        <button class="ft-btn" id="btn-land-edge" onclick="openSelectedLandEdgePanel()" style="display:none">ด้านที่ดิน</button>
+        <button class="ft-btn" id="btn-setbackdist" onclick="toggleSetbackDistance()" style="display:none">ระยะช่วยวัด</button>
+      </div>
+      <div class="more-section">
+        <div class="more-section-title">มุมมองและงานหน้า</div>
+        <button class="ft-btn" id="btn-loupe" onclick="toggleLoupe()" title="เปิด/ปิดแว่นขยาย (ใช้ขณะวาด)">🔍 แว่น</button>
+        <button class="ft-btn" onclick="resizeLoupe(-20)" title="แว่นเล็กลง">− เล็กลง</button>
+        <span id="lbl-loupe-r" class="ft-btn" style="justify-content:center;color:var(--text2)">160px</span>
+        <button class="ft-btn" onclick="resizeLoupe(+20)" title="แว่นใหญ่ขึ้น">+ ใหญ่ขึ้น</button>
+        <button class="ft-btn danger more-wide" id="btn-clear-measures" onclick="clearMeasures()">🗑 ล้าง</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="snap-cur"></div><div id="snap-lbl"></div>
+<div id="obj-picker"><div id="obj-picker-hdr">เลือก object</div><div id="obj-picker-rows"></div></div>
+<div id="ctx-menu">
+  <div class="ctx-color-row"><span>สี</span><input type="color" id="ctx-inp-color" oninput="ctxColor(this.value)"><input type="range" id="ctx-inp-opacity" min="10" max="100" value="85" oninput="ctxOpacity(+this.value)"><span id="ctx-opacity-val">85%</span></div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-rename" onclick="ctxRename()">✏️ เปลี่ยนชื่อ</div>
+  <div class="ctx-item" id="ctx-land-edges" onclick="ctxLandEdges()">กำหนดด้านที่ดิน</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item del" onclick="ctxDelete()">🗑 ลบ</div>
+</div>
+<div id="calib-panel" class="panel">
+  <h3>📐 สอบเทียบสเกล</h3>
+  <div id="calib-line-info" style="font-size:11px;color:var(--text2);margin-bottom:14px">คลิก 2 จุด บนเส้นที่ทราบระยะจริง</div>
+  <label>ระยะจริงระหว่าง 2 จุด (เมตร)</label>
+  <input id="calib-input" class="panel-input" type="number" step="0.01" min="0.01" placeholder="เช่น 7.71">
+  <div class="panel-row"><button class="btn-ok" onclick="finishCalib()">ยืนยัน</button><button class="btn-cancel" onclick="cancelCalib()">ยกเลิก</button></div>
+</div>
+<div id="name-panel" class="panel">
+  <h3 id="name-panel-title">ชื่อพื้นที่</h3>
+  <div class="atype-row" id="atype-row" style="display:none"><button class="atype-btn sel" id="atype-room" onclick="setAType('room')">🏠 ห้อง/อาคาร</button><button class="atype-btn" id="atype-building" onclick="setAType('building')">▣ แนวอาคาร</button><button class="atype-btn" id="atype-land" onclick="setAType('land')">🌿 ที่ดิน</button><button class="atype-btn" id="atype-residential_unit" onclick="setAType('residential_unit')">ยูนิตพักอาศัย</button><button class="atype-btn" id="atype-bedroom" onclick="setAType('bedroom')">ห้องนอน</button><button class="atype-btn" id="atype-corridor" onclick="setAType('corridor')">ทางเดิน</button><button class="atype-btn" id="atype-stair" onclick="setAType('stair')">บันได</button><button class="atype-btn" id="atype-fire_stair" onclick="setAType('fire_stair')">บันไดหนีไฟ</button><button class="atype-btn" id="atype-parking_area" onclick="setAType('parking_area')">พื้นที่จอดรถ</button><button class="atype-btn" id="atype-service" onclick="setAType('service')">บริการ</button><button class="atype-btn" id="atype-gfa" onclick="setAType('gfa')">GFA</button><button class="atype-btn" id="atype-non_gfa" onclick="setAType('non_gfa')">ไม่คิด GFA</button></div>
+  <label>ชื่อพื้นที่ / ห้อง</label>
+  <input id="name-input" class="panel-input" type="text" placeholder="เช่น ห้องนอน 1">
+  <div class="panel-row"><button class="btn-ok" onclick="finishName()">ตกลง</button><button class="btn-cancel" onclick="cancelName()">ข้าม</button></div>
+</div>
+<div id="land-edge-panel" class="panel">
+  <h3>กำหนดด้านที่ดิน</h3>
+  <div class="edge-help">คลิกเส้นขอบที่ดินบนแบบ แล้วเลือกชนิดด้าน ระบบจะเก็บ tag ไว้กับ edge นั้น</div>
+  <div class="edge-meta" id="land-edge-meta">ยังไม่ได้เลือกด้าน</div>
+  <div class="edge-grid" id="land-edge-types"></div>
+  <label>ความกว้างถนน / หมายเหตุ (ถ้ามี)</label>
+  <input id="land-edge-note" class="panel-input" type="text" placeholder="เช่น ถนน 8.00 ม. หรือ คลอง">
+  <div class="panel-row"><button class="btn-ok" onclick="applyLandEdgeTag()">ใช้กับด้านนี้</button><button class="btn-cancel" onclick="closeLandEdgePanel()">เสร็จ</button></div>
+</div>
+<div id="setup-overlay">
+  <div id="setup-hdr"><div class="setup-brand"><span class="setup-mark">BM</span><span>BMA-Plan</span></div><h2>Page Setup</h2><span class="pdf-name" id="setup-pdf-name"></span><button class="setup-save-btn" onclick="saveProject()">บันทึก</button><button id="setup-start-btn" onclick="startCheck()">เริ่มวัด ▶</button></div>
+  <div id="setup-body">
+    <div id="proj-form-panel">
+      <div class="setup-section">
+        <h3>ข้อมูลโครงการ</h3>
+        <div class="pf-row"><label>เลขที่โครงการ</label><input id="pi-reqno" placeholder="เช่น BMA-2569-001"></div>
+        <div class="pf-row" style="display:none"><label>advanced-unused</label><select id="pi-zone"><option value=""></option></select></div>
+        <div class="pf-row"><label>ประเภทอาคาร</label><select id="pi-btype"><option value="">-- เลือก --</option><option value="house">บ้านเดี่ยว</option><option value="townhouse">ทาวน์เฮาส์</option><option value="condo">คอนโด</option><option value="apartment">อพาร์ตเมนต์</option><option value="office">สำนักงาน</option><option value="retail">พาณิชย์</option><option value="hotel">โรงแรม</option><option value="mixed">Mixed-use</option></select></div>
+        <div class="pf-row"><label>ลักษณะงาน</label><select id="pi-worktype"><option value="new">ก่อสร้างใหม่</option><option value="modify">ดัดแปลง</option><option value="demolish">รื้อถอน</option></select></div>
+      </div>
+      <div class="setup-section">
+        <h3>ข้อมูลอาคาร</h3>
+        <div class="pf-row" style="display:none"><label>ความสูง (ม.)</label><input id="pi-height" type="number" min="0" step="0.1"></div>
+        <div class="pf-row"><label>จำนวนชั้น</label><input id="pi-floors" type="number" min="1" step="1"></div>
+        <div class="pf-row"><label>GFA รวม (ตร.ม.)</label><input id="pi-gfa" type="number" min="0" step="1"></div>
+        <div class="pf-row"><label>จำนวนหน่วย</label><input id="pi-units" type="number" min="0" step="1"></div>
+        <h3 style="display:none;margin-top:4px">ถนน (ม.)</h3>
+        <div class="pf-row" style="display:none"><label>ด้านหน้า</label><input id="pi-road" type="number" min="0" step="0.5"></div>
+        <div style="display:none;grid-template-columns:1fr 1fr;gap:6px"><div class="pf-row"><label>ด้านซ้าย</label><input id="pi-road-l" type="number" min="0" step="0.5"></div><div class="pf-row"><label>ด้านขวา</label><input id="pi-road-r" type="number" min="0" step="0.5"></div></div>
+        <div class="pf-row" style="display:none"><label>ด้านหลัง</label><input id="pi-road-b" type="number" min="0" step="0.5"></div>
+      </div>
+      <div class="setup-section">
+        <h3>การตั้งชื่อและจัดหมวดหมู่</h3>
+        <div class="pf-row"><label>ผังบริเวณ</label><input id="auto-site" value="ผังบริเวณ"></div>
+        <div class="pf-row"><label>ชั้น</label><input id="auto-plan" value="ชั้น "></div>
+        <div class="pf-row"><label>รูปด้าน</label><input id="auto-elev" value="รูปด้าน "></div>
+        <div class="pf-row"><label>รูปตัด</label><input id="auto-section" value="รูปตัด "></div>
+        <div class="pf-row"><label>รายละเอียด</label><input id="auto-detail" value="รายละเอียด "></div>
+        <div class="pf-row"><label>ตาราง</label><input id="auto-schedule" value="ตาราง "></div>
+        <button id="setup-auto-name" class="setup-auto-btn" onclick="applyAutoNamesFromSetup()">ตั้งชื่ออัตโนมัติทุกหน้า</button>
+      </div>
+    </div>
+    <div id="tag-grid-wrap">
+      <div class="setup-main-head"><div class="setup-main-title"><h3>จัดการหน้า</h3><p>ตรวจหน้า ตั้งชื่อ และจัดหมวดหมู่ก่อนเริ่มวัด</p></div><div id="setup-summary-chips"></div></div>
+      <div class="setup-tools"><input id="setup-page-search" type="search" placeholder="ค้นหาหน้า..." oninput="setupSearch=this.value;buildTagGrid()"><button id="setup-filter-btn" onclick="toggleSetupFilter()">ตัวกรอง: ทั้งหมด</button></div>
+      <div id="tag-grid"></div>
+    </div>
+  </div>
+  <div id="setup-footer"><span>เคล็ดลับ: ใช้ตั้งชื่ออัตโนมัติเป็นค่าเริ่มต้น แล้วปรับชื่อหรือหมวดหมู่รายหน้าได้ทันที</span><span id="setup-save-status">รอการตั้งค่า</span></div>
+</div>
+<div id="check-panel"><div id="check-hdr"><h3>📊 รายงานการวัด</h3><button onclick="openSetup()">⚙</button><button onclick="openCheckPanel()">↻</button><button onclick="closeCheckPanel()">✕</button></div><div id="check-body"><p style="padding:16px;color:var(--text3)">กด 📊 รายงาน เพื่อสรุปข้อมูลการวัด</p></div></div>
+<div id="export-panel"><button class="export-close" onclick="closeExportPanel()">✕</button><h3>📤 Export</h3><div class="export-section"><h4>📊 Excel Report</h4><div style="font-size:11px;color:var(--text2);margin-bottom:4px">☑ Sheet 1: สรุปพื้นที่ (มี Tag)<br>☑ Sheet 2: ความยาวเส้น<br>☑ Sheet 3: สรุปตามชั้น<br>☑ Sheet 4: สรุปตามประเภท</div><button class="export-btn green" onclick="exportXLSX()">⬇ Export Excel</button></div><div class="export-section"><h4>📄 PDF</h4><button class="tb" style="width:100%;margin-bottom:4px" onclick="openPageManager();closeExportPanel()">📄 จัดการหน้า / Export PDF</button></div><div class="export-section"><h4>📋 ข้อมูล</h4><div style="display:flex;gap:6px"><button class="tb" style="flex:1" onclick="exportJSON()">⬇ JSON</button><button class="tb" style="flex:1" onclick="exportCSV()">⬇ CSV</button></div></div><div class="export-section"><h4>💾 โปรเจกต์</h4><div style="display:flex;gap:6px"><button class="tb" style="flex:1" onclick="saveProject()">💾 Save</button><label class="tb" style="flex:1;text-align:center;cursor:pointer">📂 Load<input id="proj-input2" type="file" accept=".bmaplan" style="display:none"></label></div></div></div>
+<div id="draw-bar">
+  <button id="dbar-finish" onclick="drawBarFinish()">✓ จบ</button>
+  <button id="dbar-undo" onclick="drawBarUndoPt()">↩ ลบจุด</button>
+  <button id="dbar-cancel" onclick="drawBarCancel()">✗ ยกเลิก</button>
+  <span id="dbar-pts"></span>
+</div>
+<canvas id="loupe" style="display:none;position:fixed;border-radius:50%;border:2px solid #636366;box-shadow:0 4px 20px rgba(0,0,0,.8);pointer-events:none;z-index:9999;"></canvas>
+<div id="pgmgr-overlay" onclick="if(event.target===this)closePgMgr()"><div id="pgmgr-box" onclick="event.stopPropagation()" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(90vw,820px);max-height:85vh;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7)"><div id="pgmgr-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="font-size:13px;font-weight:700;flex:1">📄 จัดการหน้า</h3><span id="pgmgr-sel-info" style="font-size:11px;color:var(--text2);min-width:80px">เลือก 0 หน้า</span><button class="tb" onclick="pgmgrSelectAll()">เลือกทั้งหมด</button><button class="tb" onclick="pgmgrClearAll()">ยกเลิก</button><button class="tb danger" onclick="closePgMgr()">✕</button></div><div id="pgmgr-grid" style="display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding:4px 2px;flex:1"></div><div class="pgmgr-footer" style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid var(--border)"><button class="tb" style="background:var(--blue);color:#fff" onclick="pgmgrExportPDF(false)">⬇ Save PDF</button><button class="tb" style="background:var(--blue);color:#fff" onclick="pgmgrExportPDF(true)">⬇ PDF + annotations</button><button class="tb" onclick="saveProject()">💾 บันทึกโปรเจกต์</button></div></div></div>
+<script>
+// ══════════════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════════════
+let totalPages=0,curPage=1,pageData=null;const RS=1.5;
+let zoom=1,panX=0,panY=0,mode="pan";
+let mPts=[],mLines=[],mPolys=[],mRefs=[],mParking=[];
+let isPan=false,lastMx=0,lastMy=0;
+let bgImg=null,snapTarget=null,guidePoint=null;
+let calibPts=[];
+let pageRotations={},pageStore={},pageTags={},pageNames={},projectInfo={},siteOrientation={},analyseCache={};
+let nameCb=null,ctxTarget=null;
+let snapModes={ep:true,mp:true,ct:true,nl:false,ix:false,off:false};
+let snapRadius=20,closeRadius=18;
+let curColor="#30d158",curOpacity=0.85,curAType="room";
+let curRefType="road",curParkingType="car";
+let selItem=null,dragState=null,undoStack=[],redoStack=[],showRefDistances=false,showSetbackDistances=false,ignoreNextObjPickerDocumentClick=false;
+let spaceDown=false,preSpaceMode="pan",shiftDown=false;
+let layerVis={base_area:true,sub_area:true,deduction:true,reference_geometry:true,labels:true};let layerLock={base_area:false,sub_area:false,deduction:false,reference_geometry:false};let orthoMode=false;
+const AREA_TYPE_LABELS={room:"ห้อง/อาคาร",building:"แนวอาคาร",land:"ที่ดิน",gfa:"GFA",non_gfa:"ไม่คิด GFA",residential_unit:"ยูนิตพักอาศัย",bedroom:"ห้องนอน",corridor:"ทางเดิน",stair:"บันได",fire_stair:"บันไดหนีไฟ",parking_area:"พื้นที่จอดรถ",service:"บริการ"};
+function areaTypeLayer(t){return(t==="land"||t==="gfa"||t==="building")?"base_area":"sub_area";}
+function polyCanvasAreaPx(cp){let a=0;for(let i=0;i<cp.length;i++){const j=(i+1)%cp.length;a+=cp[i].x*cp[j].y-cp[j].x*cp[i].y;}return Math.abs(a)/2;}
+let currentFileName="",pgmgrSel=new Set(),pgmgrLastClick=null,setupSearch="",setupFilter="all",setupSelectedPage=null;
+let docVersion=0,pageLoadSeq=0,analyseSeq=0,currentCaseId="";
+let excludedPages=new Set(),mOpenings=[],perpMode=false,openingMode=false;
+let sidebarCollapsed=false,selectedPages=new Set();
+let collapsedGroups=new Set(["hidden"]),searchFilter="";
+let landEdgeState={open:false,polyIdx:null,edgeIdx:null,type:"neighbor"};
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const ws=document.getElementById("workspace");
+const cc=document.getElementById("cc");
+const snapCur=document.getElementById("snap-cur");
+const snapLbl=document.getElementById("snap-lbl");
+const ctxMenu=document.getElementById("ctx-menu");
+const namePanel=document.getElementById("name-panel");
+const calibPanel=document.getElementById("calib-panel");
+const SNAP_COLORS={ep:"#ffd60a",mp:"#ff9500",ct:"#5ac8fa",nl:"#30d158",ix:"#ff453a",close:"#30d158",perp:"#bf5af2"};
+const SNAP_LABELS={ep:"EP",mp:"MP",ct:"CT",nl:"NL",ix:"IX",close:"CLOSE",perp:"⊥"};
+const TAG_OPTIONS=[{value:"",label:"— ไม่ระบุ —",cls:""},{value:"site",label:"ผังบริเวณ",cls:"site"},{value:"plan",label:"ชั้น",cls:"plan"},{value:"elev",label:"รูปด้าน",cls:"elev"},{value:"section",label:"รูปตัด",cls:"section"},{value:"detail",label:"รายละเอียด",cls:"detail"},{value:"schedule",label:"ตาราง",cls:"schedule"},{value:"other",label:"อื่น ๆ",cls:"other"}];
+const TAG_LABELS={site:"ผังบริเวณ",plan:"ชั้น",elev:"รูปด้าน",section:"รูปตัด",detail:"รายละเอียด",schedule:"ตาราง",other:"อื่น ๆ"};
+const AUTO_TEMPLATES={site:(n)=>{const t=document.getElementById("auto-site")?.value||"ผังบริเวณ";return n===1?t:t+" "+n;},plan:(n)=>{const t=document.getElementById("auto-plan")?.value||"ชั้น ";const names=["","ชั้น 1","ชั้น 2","ชั้น 3","ชั้น 4","ชั้น 5","ชั้น 6","ชั้น 7","ชั้น 8","ดาดฟ้า"];return names[n]||t+n;},elev:(n)=>{const t=document.getElementById("auto-elev")?.value||"รูปด้าน ";return t+n;},section:(n)=>{const t=document.getElementById("auto-section")?.value||"รูปตัด ";return t+n;},detail:(n)=>{const t=document.getElementById("auto-detail")?.value||"รายละเอียด ";return t+n;},schedule:(n)=>{const t=document.getElementById("auto-schedule")?.value||"ตาราง ";return t+n;},other:(n)=>`หน้า ${n}`};
+const SETUP_FILTER_LABELS={all:"ทั้งหมด",categorized:"จัดหมวดหมู่แล้ว",uncategorized:"ยังไม่จัดหมวดหมู่",visible:"ยังใช้วัด",hidden:"ซ่อนแล้ว",site:"ผังบริเวณ",plan:"ชั้น",elev:"รูปด้าน",section:"รูปตัด",detail:"รายละเอียด",schedule:"ตาราง",other:"อื่น ๆ"};
+function hexAlpha(h,a){const r=parseInt(h.slice(1,3),16)||0,g=parseInt(h.slice(3,5),16)||0,b=parseInt(h.slice(5,7),16)||0;return`rgba(${r},${g},${b},${a})`;}
+function analyseKey(n){return`${docVersion}:${n}:${getRot(n)}`;}
+function caseQuery(){return currentCaseId?`case_id=${encodeURIComponent(currentCaseId)}`:"";}
+function thumbUrl(n){const rot=getRot(n);return`/thumb/${n}?${caseQuery()}&rot=${rot}&v=${docVersion}`;}
+function scaleState(s){if(!s)return"missing";if(s.calibrated||s.source==="manual")return"manual";if(s.verified)return"ok";return"warn";}
+function scaleLabel(s){if(!s)return"ไม่พบ scale";if(s.calibrated||s.source==="manual")return s.label;if(s.verified)return s.label;return`${s.label} ?`;}
+function getScaleForPage(pg){return pageStore[pg]?.calibScale||analyseCache[analyseKey(pg)]?.scale||null;}
+function getRot(n){return pageRotations[n]||0;}
+function getStore(n){if(!pageStore[n])pageStore[n]={lines:[],polys:[],openings:[],refs:[],parking:[],calibScale:null};return pageStore[n];}
+function saveCurrentPage(){normalizeCurrentObjects();const s=getStore(curPage);s.lines=[...mLines];s.polys=[...mPolys];s.openings=[...mOpenings];s.refs=[...mRefs];s.parking=[...mParking];ensureStoreObjectIds(s);if(pageData?.scale?.calibrated)s.calibScale=pageData.scale;}
+function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;updatePageSummary(n);}
+function getNextPage(n){for(let i=n+1;i<=totalPages;i++)if(!excludedPages.has(i))return i;return null;}
+function getPrevPage(n){for(let i=n-1;i>=1;i--)if(!excludedPages.has(i))return i;return null;}
+function setWorkflowState(id,state){const el=document.getElementById(id);if(!el)return;el.classList.toggle("done",state==="done");el.classList.toggle("warn",state==="warn");}
+function updateWorkspaceState(){
+  const hasPdf=!!totalPages&&!!currentCaseId;
+  document.getElementById("empty-state")?.classList.toggle("hidden",hasPdf);
+  const scale=getScaleForPage(curPage)||pageData?.scale||null,notice=document.getElementById("scale-notice");
+  if(notice){
+    const title=document.getElementById("scale-notice-title"),desc=document.getElementById("scale-notice-desc");
+    notice.classList.toggle("open",hasPdf);
+    notice.classList.remove("ready","warn");
+    if(!hasPdf){title.textContent="เปิด PDF เพื่อเริ่มวัด";desc.textContent="ยังไม่มีไฟล์";notice.classList.add("warn");}
+    else if(scale){notice.classList.add(scaleState(scale)==="warn"?"warn":"ready");title.textContent=scaleState(scale)==="warn"?"ตรวจพบ Scale แต่ยังไม่ยืนยัน":"พร้อมวัดพื้นที่ — Scale ถูกตั้งค่าแล้ว";desc.textContent=scaleState(scale)==="warn"?"ควรตรวจทานหรือสอบเทียบก่อนใช้ค่าพื้นที่จริง":scaleLabel(scale);}
+    else{notice.classList.add("warn");title.textContent="ยังไม่ได้ตั้ง Scale — ค่าพื้นที่ยังใช้จริงไม่ได้";desc.textContent="กรุณาตั้ง Scale ก่อนวัดพื้นที่เพื่อให้ค่าพื้นที่ถูกต้อง";}
+  }
+  const store=getStore(curPage),hasArea=(curPage&&((mPolys.length)||(store.polys||[]).length)),hasOpening=(curPage&&((mOpenings.length)||(store.openings||[]).length)),hasObjects=hasArea||hasOpening||mLines.length||mRefs.length||mParking.length;
+  setWorkflowState("wf-open",hasPdf?"done":"");
+  setWorkflowState("wf-scale",scale?"done":hasPdf?"warn":"");
+  setWorkflowState("wf-page-setup",hasPdf?"warn":"");
+  setWorkflowState("wf-measure",hasObjects?"done":scale?"warn":"");
+  setWorkflowState("wf-review",hasObjects?"warn":"");
+  setWorkflowState("wf-export",hasObjects?"warn":"");
+  updateBottomBar();
+}
+// ══════════════════════════════════════════════════════
+// Sidebar
+// ══════════════════════════════════════════════════════
+function buildSidebar(){
+  const content=document.getElementById("sidebar-content");content.innerHTML="";
+  const groups={site:{label:"🏗 ผังบริเวณ",pages:[]},plan:{label:"📐 ชั้น",pages:[]},elev:{label:"📏 รูปด้าน",pages:[]},section:{label:"▥ รูปตัด",pages:[]},detail:{label:"🔍 รายละเอียด",pages:[]},schedule:{label:"☷ ตาราง",pages:[]},other:{label:"📄 อื่น ๆ",pages:[]},none:{label:"📄 ยังไม่ระบุ",pages:[]},hidden:{label:"🚫 ซ่อนไว้",pages:[]}};
+  for(let i=1;i<=totalPages;i++){const excl=excludedPages.has(i);const tag=pageTags[i]||"";const g=excl?"hidden":(tag||"none");if(!groups[g])groups[g]={label:g,pages:[]};groups[g].pages.push(i);}
+  const order=["site","plan","elev","section","detail","schedule","other","none","hidden"];let visibleCount=0;
+  for(const gk of order){
+    const g=groups[gk];if(!g||!g.pages.length)continue;
+    const isCollapsed=collapsedGroups.has(gk);
+    const div=document.createElement("div");div.className="page-group";div.dataset.group=gk;
+    div.innerHTML=`<div class="group-header" data-group="${gk}" onclick="toggleGroup('${gk}')"><span class="arrow ${isCollapsed?'':'open'}">▶</span>${g.label}<span class="count">${g.pages.length}</span></div><div class="group-body ${isCollapsed?'hidden':''}">${g.pages.map(n=>{
+      const tag=pageTags[n]||"",name=pageNames[n]||`หน้า ${n}`,excl=excludedPages.has(n),isActive=n===curPage;
+      const store=pageStore[n],cnt=store?(store.lines?.length||0)+(store.polys?.filter(p=>p.closed).length||0):0;
+      visibleCount++;
+      return`<div class="pg-thumb ${isActive?'active':''} ${excl?'hidden':''}" data-page="${n}" onclick="loadPage(${n})" oncontextmenu="pageCtxMenu(event,${n})"><img src="${thumbUrl(n)}" loading="lazy"><div class="pg-label">${name}</div>${tag?`<div class="pg-tag ${tag}"></div>`:''}${!excl?`<button class="pg-hide" onclick="event.stopPropagation();excludePage(${n})" title="ซ่อน">×</button>`:''}${excl?`<button class="pg-restore" onclick="event.stopPropagation();restorePage2(${n})" title="แสดง">↩</button>`:''}${cnt?`<div class="pg-dot">${cnt}</div>`:''}</div>`;
+    }).join('')}</div>`;
+    content.appendChild(div);
+  }
+  document.getElementById("sidebar-count").textContent=`${visibleCount} หน้า`;
+}
+function toggleGroup(gk){if(collapsedGroups.has(gk))collapsedGroups.delete(gk);else collapsedGroups.add(gk);buildSidebar();}
+function expandAllGroups(){collapsedGroups.clear();buildSidebar();}
+function filterPages(query){searchFilter=query.toLowerCase();document.querySelectorAll('.pg-thumb').forEach(el=>{const n=+el.dataset.page;const name=(pageNames[n]||`หน้า ${n}`).toLowerCase();const match=!query||name.includes(searchFilter);el.style.display=match?'':'none';});}
+function toggleSidebar(){sidebarCollapsed=!sidebarCollapsed;document.getElementById("sidebar").classList.toggle("collapsed",sidebarCollapsed);setTimeout(()=>{if(bgImg)fitToWindow();},220);}
+// ══════════════════════════════════════════════════════
+// Quick Tag & Auto-name
+// ══════════════════════════════════════════════════════
+function setQuickTag(tag){if(selectedPages.size===0){setStatus("เลือกหน้าจาก sidebar ก่อน (Ctrl+click)");return;}for(const n of selectedPages){pageTags[n]=tag;autoNamePage(n,tag);}selectedPages.clear();buildSidebar();if(document.getElementById("setup-overlay")?.classList.contains("open"))buildTagGrid();setStatus(`Tag ${tag} แล้ว`);}
+function hideSelectedPages(){if(selectedPages.size===0){setStatus("เลือกหน้าก่อน");return;}for(const n of selectedPages)excludePage(n);selectedPages.clear();buildSidebar();}
+function autoNamePage(n,tag,force=false){if(!tag||!AUTO_TEMPLATES[tag])return;if(!force&&pageNames[n]&&pageNames[n]!==`หน้า ${n}`)return;const count=countTagBefore(n,tag);pageNames[n]=AUTO_TEMPLATES[tag](count);}
+function countTagBefore(n,tag){let c=0;for(let i=1;i<=n;i++){if((pageTags[i]||"")===tag&&!excludedPages.has(i))c++;}return c;}
+function inferSetupTag(n){if(pageTags[n])return pageTags[n];if(n===1)return"site";return"plan";}
+function applyAutoNames(){const counts={};for(let i=1;i<=totalPages;i++){if(excludedPages.has(i))continue;const tag=inferSetupTag(i);pageTags[i]=tag;counts[tag]=(counts[tag]||0)+1;if(AUTO_TEMPLATES[tag])pageNames[i]=AUTO_TEMPLATES[tag](counts[tag]);else if(!pageNames[i])pageNames[i]=`หน้า ${i}`;}buildSidebar();buildTagGrid();touchSetupStatus("ตั้งชื่ออัตโนมัติแล้ว");setStatus("ตั้งชื่ออัตโนมัติแล้ว");}
+function applyAutoNamesFromSetup(){applyAutoNames();}
+function excludePage(n){excludedPages.add(n);if(curPage===n){const next=getNextPage(0)||getPrevPage(totalPages+1)||1;loadPage(next);}buildSidebar();if(document.getElementById("setup-overlay")?.classList.contains("open"))buildTagGrid();}
+function restorePage2(n){excludedPages.delete(n);buildSidebar();if(document.getElementById("setup-overlay")?.classList.contains("open"))buildTagGrid();}
+function pageCtxMenu(e,n){e.preventDefault();const tag=pageTags[n]||"";const menu=document.createElement("div");menu.style.cssText="position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:9px;z-index:600;min-width:180px;box-shadow:0 4px 20px rgba(0,0,0,.6);overflow:hidden";menu.style.left=Math.min(e.clientX,window.innerWidth-200)+"px";menu.style.top=Math.min(e.clientY,window.innerHeight-200)+"px";let html="";for(const opt of TAG_OPTIONS){if(opt.value===tag)html+=`<div class="ctx-item" style="background:var(--surface2);font-weight:600" onclick="this.parentElement.remove();setPageTag(${n},'${opt.value}')">✓ ${opt.label}</div>`;else html+=`<div class="ctx-item" onclick="this.parentElement.remove();setPageTag(${n},'${opt.value}')">${opt.label}</div>`;}html+=`<div class="ctx-sep"></div><div class="ctx-item" onclick="this.parentElement.remove();excludePage(${n})">🚫 ซ่อนหน้านี้</div><div class="ctx-item" onclick="this.parentElement.remove();autoNamePage(${n},pageTags[${n}]||'');buildSidebar()">🔄 ตั้งชื่ออัตโนมัติ</div>`;menu.innerHTML=html;document.body.appendChild(menu);setTimeout(()=>document.addEventListener("click",()=>menu.remove(),{once:true}),10);}
+// ══════════════════════════════════════════════════════
+// Upload & Load
+// ══════════════════════════════════════════════════════
+async function uploadPdfFile(file){if(!file)return false;setStatus("กำลังโหลด…");const fd=new FormData();fd.append("file",file);const res=await fetch("/upload",{method:"POST",body:fd});const d=await res.json();if(!res.ok){setStatus("upload ไม่สำเร็จ: "+(d.error||""));return false;}docVersion++;pageLoadSeq++;analyseSeq++;pageData=null;bgImg=null;currentCaseId=d.case_id||"";pageStore={};analyseCache={};pageRotations={};pageTags={};pageNames={};projectInfo={};siteOrientation={};excludedPages=new Set();undoStack=[];redoStack=[];totalPages=d.pages;currentFileName=file.name;document.getElementById("file-info").textContent=file.name;const saveState=document.getElementById("lbl-save-state");if(saveState)saveState.textContent="Manual save required";updateWorkspaceState();openSetup();setStatus(`โหลด ${d.pages} หน้าแล้ว`);return true;}
+async function openSamplePdf(){try{setStatus("กำลังเปิดไฟล์ตัวอย่าง…");const r=await fetch("/sample-pdf");if(!r.ok)throw new Error("sample not available");const blob=await r.blob();const file=new File([blob],"test_plan_A1.pdf",{type:"application/pdf"});await uploadPdfFile(file);}catch(err){setStatus("เปิดตัวอย่างไม่สำเร็จ: "+err.message);}}
+document.getElementById("file-input").addEventListener("change",async e=>{const file=e.target.files[0];if(!file)return;await uploadPdfFile(file);e.target.value="";});
+async function loadPage(n){saveCurrentPage();const loadToken=++pageLoadSeq;curPage=n;document.getElementById("page-lbl").textContent=n+" / "+totalPages;document.getElementById("btn-prev").disabled=!getPrevPage(n);document.getElementById("btn-next").disabled=!getNextPage(n);mPts=[];calibPts=[];calibPanel.style.display="none";snapTarget=null;guidePoint=null;snapCur.style.display="none";snapLbl.style.display="none";document.getElementById("measure-result").textContent="";updateWorkspaceState();const rot=getRot(n);const b=document.getElementById("rot-badge");b.style.display=rot?"inline":"none";b.textContent=rot?rot+"°":"";restorePage(n);await new Promise(res=>{const img=new Image();img.onload=()=>{bgImg=img;canvas.width=img.width;canvas.height=img.height;res();};img.src=`/page/${n}?${caseQuery()}&scale=${RS}&rot=${rot}&v=${docVersion}`;});if(loadToken!==pageLoadSeq||n!==curPage||rot!==getRot(curPage))return;fitToWindow();redraw();const cached=analyseCache[analyseKey(n)];if(cached){pageData=cached;updateAnalyseUI(pageData);}fetchAnalyse(n);buildSidebar();updateBottomBar();buildRightPanel();updateWorkspaceState();}
+function fetchAnalyse(n){const requestSeq=++analyseSeq;const versionAtRequest=docVersion;const rot=getRot(n);fetch(`/analyse/${n}?${caseQuery()}&rot=${rot}`).then(async r=>{let d=null;try{d=await r.json();}catch{}if(!r.ok)throw new Error(d?.error||"analyse failed");return d;}).then(d=>{if(requestSeq!==analyseSeq||versionAtRequest!==docVersion||rot!==getRot(n))return;if(pageStore[n]?.calibScale)d.scale=pageStore[n].calibScale;analyseCache[analyseKey(n)]=d;if(n===curPage){pageData=d;updateAnalyseUI(d);}const parts=[scaleLabel(d.scale)];if(d.degraded_mode==="raster")parts.push("manual/raster mode");else parts.push((d.snaps?.length||0)+" pts",(d.lines?.length||0)+" segs");if(d.warning)parts.push(d.warning);setStatus(parts.join(" · "));}).catch(err=>{if(versionAtRequest!==docVersion||n!==curPage)return;setStatus(`analyse error: ${err.message}`);});}
+function updateAnalyseUI(d){const badge=document.getElementById("scale-badge");const lblS=document.getElementById("lbl-scale");const lblSnap=document.getElementById("lbl-snaps");if(!d){badge.className="warn";badge.textContent="กำลังวิเคราะห์…";lblS.textContent="—";lblSnap.textContent="—";lblSnap.title="";updatePageSummary(curPage);updateWorkspaceState();redraw();return;}buildSnapIndex(d);if(d.scale){badge.className=scaleState(d.scale);badge.textContent=scaleLabel(d.scale);lblS.textContent=scaleLabel(d.scale);}else{badge.className="";badge.textContent="ไม่พบ scale";lblS.textContent="—";}lblSnap.textContent=d.degraded_mode==="raster"?"manual only":`${d.snaps?.length||0} pts · ${d.lines?.length||0} segs`;const m=d.snap_meta||{};lblSnap.title=m.engine?`engine=${m.engine}, grid=${m.snap_grid_pt}pt, raw EP=${m.raw_ep||0}, MP=${m.raw_mp||0}, CT=${m.raw_ct||0}, lines=${m.raw_lines||0}`:"";updatePageSummary(curPage);updateBottomBar();updateWorkspaceState();redraw();}
+function activeLayerLabel(){const sel=document.getElementById("active-layer-select");return sel?.selectedOptions?.[0]?.textContent?.replace(/^Layer:\s*/,"").trim()||"—";}
+function currentObjectCount(){return mLines.length+mRefs.length+mParking.length+mPolys.filter(p=>p.closed).length+mOpenings.filter(o=>o.closed).length;}
+function currentWarningCount(){let n=0;if(totalPages&&!getScaleForPage(curPage)&&currentObjectCount()>0)n++;for(const p of mPolys){if(p.closed&&!p.name)n++;}for(const o of mOpenings){if(o.closed&&!o.parentId)n++;}return n;}
+function updateBottomBar(){const name=pageNames[curPage]||`หน้า ${curPage||"—"}`;document.getElementById("bb-page-name").textContent=name;const obj=document.getElementById("lbl-objects");if(obj)obj.textContent=String(currentObjectCount());const warn=document.getElementById("lbl-warnings");if(warn)warn.textContent=String(currentWarningCount());const lyr=document.getElementById("lbl-layer");if(lyr)lyr.textContent=activeLayerLabel();}
+// ══════════════════════════════════════════════════════
+// Fit/Zoom/Rotate
+// ══════════════════════════════════════════════════════
+function fitToWindow(){const W=ws.clientWidth,H=ws.clientHeight;zoom=Math.min((W-20)/canvas.width,(H-20)/canvas.height,2);panX=Math.round((W-canvas.width*zoom)/2);panY=Math.round((H-canvas.height*zoom)/2);applyT();}
+function applyT(){cc.style.transform=`translate(${panX}px,${panY}px) scale(${zoom})`;document.getElementById("zoom-val").textContent=Math.round(zoom*100)+"%";}
+function adjustZoom(factor){const W=ws.clientWidth,H=ws.clientHeight;const fx=W/2,fy=H/2;const nz=Math.max(0.08,Math.min(8,zoom*factor));panX=fx-(fx-panX)*(nz/zoom);panY=fy-(fy-panY)*(nz/zoom);zoom=nz;applyT();}
+function zoomAt(factor,cx,cy){const nz=Math.max(0.08,Math.min(8,zoom*factor));if(Math.abs(nz-zoom)<0.0001)return;panX=cx-(cx-panX)*(nz/zoom);panY=cy-(cy-panY)*(nz/zoom);zoom=nz;applyT();}
+function rotatePage(delta){saveCurrentPage();const r=(getRot(curPage)+delta+360)%360;pageRotations[curPage]=r;const b=document.getElementById("rot-badge");b.style.display=r?"inline":"none";b.textContent=r+"°";reloadPageImage();}
+function reloadPageImage(){const loadToken=++pageLoadSeq;const rot=getRot(curPage);const img=new Image();const pageAtRequest=curPage;img.onload=()=>{if(loadToken!==pageLoadSeq||pageAtRequest!==curPage||rot!==getRot(curPage))return;bgImg=img;canvas.width=img.width;canvas.height=img.height;fitToWindow();redraw();};img.src=`/page/${curPage}?${caseQuery()}&scale=${RS}&rot=${rot}&v=${docVersion}&t=${Date.now()}`;fetchAnalyse(curPage);}
+// ══════════════════════════════════════════════════════
+// Snap
+// ══════════════════════════════════════════════════════
+function gridAdd(grid,key,obj){if(!grid.has(key))grid.set(key,[]);grid.get(key).push(obj);}
+function gridRange(v0,v1,cell){return[Math.floor(Math.min(v0,v1)/cell),Math.floor(Math.max(v0,v1)/cell)];}
+function buildSnapIndex(d){
+  if(!d||d._snapIndex)return;
+  const cell=80,points={ep:new Map(),mp:new Map(),ct:new Map()},lines=new Map();
+  for(const s of(d.snaps||[])){
+    const t=s.t||"ep";if(!points[t])points[t]=new Map();
+    const obj={x:s.x*RS,y:s.y*RS,t};
+    gridAdd(points[t],`${Math.floor(obj.x/cell)},${Math.floor(obj.y/cell)}`,obj);
+  }
+  for(const raw of(d.lines||[])){
+    const l=lineToCanvas(raw),pad=1;
+    const [gx0,gx1]=gridRange(l.x0,l.x1,cell),[gy0,gy1]=gridRange(l.y0,l.y1,cell);
+    for(let gx=gx0-pad;gx<=gx1+pad;gx++)for(let gy=gy0-pad;gy<=gy1+pad;gy++)gridAdd(lines,`${gx},${gy}`,l);
+  }
+  d._snapIndex={cell,points,lines};
+}
+function gridNearby(grid,cx,cy,r,cell){
+  const out=[],seen=new Set();
+  const [gx0,gx1]=gridRange(cx-r,cx+r,cell),[gy0,gy1]=gridRange(cy-r,cy+r,cell);
+  for(let gx=gx0;gx<=gx1;gx++)for(let gy=gy0;gy<=gy1;gy++){
+    const bucket=grid.get(`${gx},${gy}`)||[];
+    for(const obj of bucket){if(seen.has(obj))continue;seen.add(obj);out.push(obj);}
+  }
+  return out;
+}
+function polyCanvasEdges(poly){const pts=poly?.pts||[];const out=[];if(pts.length<2)return out;const cp=pts.map(p=>pdfToC(p.x,p.y));for(let i=0;i<cp.length-1;i++)out.push({x0:cp[i].x,y0:cp[i].y,x1:cp[i+1].x,y1:cp[i+1].y,src:"user"});if(poly.closed&&cp.length>2)out.push({x0:cp[cp.length-1].x,y0:cp[cp.length-1].y,x1:cp[0].x,y1:cp[0].y,src:"user"});return out;}
+function userSnapLines(){const out=[];for(const l of mLines){for(const seg of lineSegments(l)){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);out.push({x0:a.x,y0:a.y,x1:b.x,y1:b.y,src:"user"});}}for(const r of mRefs){for(const seg of lineSegments(r)){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);out.push({x0:a.x,y0:a.y,x1:b.x,y1:b.y,src:"ref"});}}for(const p of mPolys)out.push(...polyCanvasEdges(p));for(const o of mOpenings)out.push(...polyCanvasEdges(o));return out;}
+function userSnapPoints(t){
+  const pts=[];
+  const add=(x,y)=>pts.push({x,y,t});
+  const addPoly=poly=>{const cp=(poly?.pts||[]).map(p=>pdfToC(p.x,p.y));if(!cp.length)return;if(t==="ep")cp.forEach(p=>add(p.x,p.y));if(t==="mp"){for(let i=0;i<cp.length-(poly.closed?0:1);i++){const a=cp[i],b=cp[(i+1)%cp.length];add((a.x+b.x)/2,(a.y+b.y)/2);}}if(t==="ct"&&poly.closed&&cp.length>=3)add(cp.reduce((s,p)=>s+p.x,0)/cp.length,cp.reduce((s,p)=>s+p.y,0)/cp.length);};
+  if(t==="ep"){for(const l of mLines){for(const p of linePts(l)){const c=pdfToC(p.x,p.y);add(c.x,c.y);}}}
+  if(t==="mp"){for(const l of mLines){for(const seg of lineSegments(l)){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);add((a.x+b.x)/2,(a.y+b.y)/2);}}}
+  if(t==="ep"){for(const r of mRefs){for(const p of linePts(r)){const c=pdfToC(p.x,p.y);add(c.x,c.y);}}for(const p of mParking){const c=pdfToC(p.x,p.y);add(c.x,c.y);}}
+  if(t==="mp"){for(const r of mRefs){for(const seg of lineSegments(r)){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);add((a.x+b.x)/2,(a.y+b.y)/2);}}}
+  mPolys.forEach(addPoly);mOpenings.forEach(addPoly);
+  return pts;
+}
+function toggleSnap(t){if(t==="off"){snapModes.off=!snapModes.off;}else{snapModes[t]=!snapModes[t];if(snapModes[t])snapModes.off=false;}updateSnapUI();}
+function updateSnapUI(){["ep","mp","ct","nl","ix","off"].forEach(t=>{document.getElementById("sn-"+t).classList.toggle("on",snapModes[t]);});if((snapModes.nl||snapModes.ix)&&pageData&&!pageData.lines?.length)fetchAnalyse(curPage,true);}
+function snap(cx,cy){
+  if(snapModes.off||!pageData)return{x:cx,y:cy,t:null};
+  const R=snapRadius/Math.max(zoom,0.1),R2=R*R,CR=closeRadius/Math.max(zoom,0.1);
+  if(mode==="area"&&mPts.length>=2){
+    const c0=pdfToC(mPts[0].x,mPts[0].y);
+    if((c0.x-cx)*(c0.x-cx)+(c0.y-cy)*(c0.y-cy)<CR*CR)return{x:c0.x,y:c0.y,t:"close"};
+  }
+  for(const preferred of["ep","mp","ct"]){
+    if(!snapModes[preferred])continue;
+    let best=null,bd=R2;
+    const grid=pageData._snapIndex?.points?.[preferred];
+    const candidates=(grid?gridNearby(grid,cx,cy,R,pageData._snapIndex.cell):(pageData.snaps||[]).filter(s=>s.t===preferred).map(s=>({x:s.x*RS,y:s.y*RS,t:s.t}))).concat(userSnapPoints(preferred));
+    for(const s of candidates){
+      const d=(s.x-cx)*(s.x-cx)+(s.y-cy)*(s.y-cy);
+      if(d<bd){bd=d;best={x:s.x,y:s.y,t:preferred};}
+    }
+    if(best)return best;
+  }
+  if(perpMode&&(mode==="dist"||mode==="path"||mode==="area")&&mPts.length){
+    const p=snapPerp(cx,cy,R*2.2);
+    if(p)return p;
+  }
+  if(snapModes.ix){
+    const p=snapIX(cx,cy,R);
+    if(p)return p;
+  }
+  if(snapModes.nl){
+    const p=snapNL(cx,cy,R);
+    if(p)return p;
+  }
+  return{x:cx,y:cy,t:null};
+}
+function lineToCanvas(l){return{x0:l[0]*RS,y0:l[1]*RS,x1:l[2]*RS,y1:l[3]*RS};}
+function nearbyLines(cx,cy,preR,limit=32){
+  const out=[],seen=new Set();
+  const index=pageData?._snapIndex;
+  const candidates=(index?gridNearby(index.lines,cx,cy,preR,index.cell):(pageData?.lines||[]).map(lineToCanvas)).concat(userSnapLines());
+  for(const l of candidates){
+    const key=`${l.x0},${l.y0},${l.x1},${l.y1}`;if(seen.has(key))continue;seen.add(key);
+    if(cx<Math.min(l.x0,l.x1)-preR||cx>Math.max(l.x0,l.x1)+preR||cy<Math.min(l.y0,l.y1)-preR||cy>Math.max(l.y0,l.y1)+preR)continue;
+    const p=nearestOnSeg(cx,cy,l.x0,l.y0,l.x1,l.y1);
+    const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+    if(d<=preR*preR)out.push({...l,d});
+  }
+  out.sort((a,b)=>a.d-b.d);
+  return out.slice(0,limit);
+}
+function snapNL(cx,cy,R){
+  let best=null,bd=R*R;
+  for(const l of nearbyLines(cx,cy,R*4,40)){
+    const p=nearestOnSeg(cx,cy,l.x0,l.y0,l.x1,l.y1);
+    const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+    if(d<bd){bd=d;best={x:p.x,y:p.y,t:"nl"};}
+  }
+  return best;
+}
+function snapIX(cx,cy,R){
+  const lines=nearbyLines(cx,cy,R*5,28);
+  let best=null,bd=R*R;
+  for(let i=0;i<lines.length;i++){
+    for(let j=i+1;j<lines.length;j++){
+      const p=segIntersect(lines[i].x0,lines[i].y0,lines[i].x1,lines[i].y1,lines[j].x0,lines[j].y0,lines[j].x1,lines[j].y1);
+      if(!p)continue;
+      const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+      if(d<bd){bd=d;best={x:p.x,y:p.y,t:"ix"};}
+    }
+  }
+  return best;
+}
+function snapPerp(cx,cy,R){
+  const last=mPts[mPts.length-1],base=pdfToC(last.x,last.y);
+  let best=null,bd=R*R;
+  for(const l of nearbyLines(cx,cy,R*3,40)){
+    const p=nearestOnSeg(base.x,base.y,l.x0,l.y0,l.x1,l.y1);
+    const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+    if(d<bd){bd=d;best={x:p.x,y:p.y,t:"perp"};}
+  }
+  return best;
+}
+function nearestOnSeg(px,py,x0,y0,x1,y1){const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;if(len2<0.01)return{x:x0,y:y0};const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));return{x:x0+t*dx,y:y0+t*dy};}
+function segIntersect(x0,y0,x1,y1,x2,y2,x3,y3){const d1x=x1-x0,d1y=y1-y0,d2x=x3-x2,d2y=y3-y2;const cross=d1x*d2y-d1y*d2x;if(Math.abs(cross)<0.5)return null;const dx=x2-x0,dy=y2-y0;const t=(dx*d2y-dy*d2x)/cross;const u=(dx*d1y-dy*d1x)/cross;if(t<0||t>1||u<0||u>1)return null;return{x:x0+t*d1x,y:y0+t*d1y};}
+// ══════════════════════════════════════════════════════
+// Coordinate transforms
+// ══════════════════════════════════════════════════════
+function origSize(){if(pageData?.size?.orig_w_pt)return{W:pageData.size.orig_w_pt,H:pageData.size.orig_h_pt};return{W:canvas.width/RS,H:canvas.height/RS};}
+function pdfToC(px,py){const{W,H}=origSize(),rot=getRot(curPage);if(rot===0)return{x:px*RS,y:py*RS};if(rot===90)return{x:(H-py)*RS,y:px*RS};if(rot===180)return{x:(W-px)*RS,y:(H-py)*RS};return{x:py*RS,y:(W-px)*RS};}
+function cToPdf(cx,cy){const{W,H}=origSize(),rot=getRot(curPage);if(rot===0)return{x:cx/RS,y:cy/RS};if(rot===90)return{x:cy/RS,y:H-cx/RS};if(rot===180)return{x:W-cx/RS,y:H-cy/RS};return{x:W-cy/RS,y:cx/RS};}
+// ══════════════════════════════════════════════════════
+// Measure helpers
+// ══════════════════════════════════════════════════════
+function ptsToM(p1,p2){const scale=getScaleForPage(curPage);if(!scale)return null;return Math.hypot(p2.x-p1.x,p2.y-p1.y)/scale.pts_per_m;}
+function linePts(line){if(Array.isArray(line?.pts)&&line.pts.length>=2)return line.pts;return[{x:line.x0,y:line.y0},{x:line.x1,y:line.y1}];}
+function lineSegments(line){const pts=linePts(line),out=[];for(let i=0;i<pts.length-1;i++)out.push({a:pts[i],b:pts[i+1],idx:i});return out;}
+function lineObjFromPts(pts){const obj={pts:pts.map(p=>({x:p.x,y:p.y})),kind:pts.length>2?"path":"line",id:newObjectId("line"),color:curColor,opacity:curOpacity,semanticTag:"dimension_line",useCategory:null};obj.x0=pts[0].x;obj.y0=pts[0].y;obj.x1=pts[pts.length-1].x;obj.y1=pts[pts.length-1].y;return obj;}
+function refObjFromPts(pts){const obj=lineObjFromPts(pts);obj.kind="ref";obj.refType=curRefType;obj.name=REF_LABELS[curRefType]||"เส้นอ้างอิง";obj.color=curColor||"#5ac8fa";obj.semanticTag="reference_line";obj.useCategory=null;return obj;}
+const REF_LABELS={road:"แนวถนน",canal:"แนวคลอง",property:"แนวเขตที่ดิน",wall:"แนวผนัง",grid:"แนวแกน",custom:"เส้นอ้างอิง"};
+const PARKING_LABELS={car:"รถยนต์",ev:"EV",disabled:"ผู้พิการ",motorcycle:"มอเตอร์ไซค์",service:"บริการ"};
+const AREA_LABELS={room:"ห้อง/อาคาร",building:"แนวอาคาร",land:"ที่ดิน",residential_unit:"ยูนิตพักอาศัย",bedroom:"ห้องนอน",corridor:"ทางเดิน",stair:"บันได",fire_stair:"บันไดหนีไฟ",parking_area:"พื้นที่จอดรถ",service:"บริการ",gfa:"GFA",non_gfa:"ไม่คิด GFA"};
+const SEMANTIC_TAG_LABELS={site_boundary:"site_boundary",parcel_side:"parcel_side",north_arrow:"north_arrow",road_line:"road_line",frontage_line:"frontage_line",gross_floor_area:"gross_floor_area",floor_area:"floor_area",use_area:"use_area",deduction_opening:"deduction_opening",void:"void",scale_line:"scale_line",reference_line:"reference_line",dimension_line:"dimension_line",label:"label",review_note:"review_note"};
+const USE_CATEGORY_LABELS={residential:"residential",commercial:"commercial",office:"office",service:"service",parking:"parking",mechanical:"mechanical",storage:"storage",circulation:"circulation",common:"common",other:"other"};
+const AREA_SEMANTIC_TAGS=new Set(["gross_floor_area","floor_area","use_area"]);
+const LAND_EDGE_TYPES={front_road:"ด้านหน้า/ถนน",side_left:"ด้านซ้าย",side_right:"ด้านขวา",back:"ด้านหลัง",neighbor:"ที่ดินข้างเคียง",canal:"คลอง/แหล่งน้ำ",ignore:"ไม่ใช้รายงาน"};
+const LAND_EDGE_COLORS={front_road:"#0a84ff",side_left:"#bf5af2",side_right:"#5ac8fa",back:"#ff9500",neighbor:"#30d158",canal:"#64d2ff",ignore:"#8e8e93"};
+const LAND_EDGE_DEFAULT_LABELS=["ด้าน 1","ด้าน 2","ด้าน 3","ด้าน 4"];
+function polyAreaM2(pts){const scale=getScaleForPage(curPage);if(!scale)return null;let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}return Math.abs(a)/(2*scale.pts_per_m**2);}
+function toRNW(m2){if(m2==null)return"";return`${Math.floor(m2/1600)}-${Math.floor((m2%1600)/400)}-${((m2%400)/4).toFixed(2)} ว.`;}
+function polySelfIntersects(pts){if(pts.length<4)return false;for(let i=0;i<pts.length;i++){const a1=pts[i],a2=pts[(i+1)%pts.length];for(let j=i+1;j<pts.length;j++){if(Math.abs(i-j)<=1)continue;if(i===0&&j===pts.length-1)continue;const b1=pts[j],b2=pts[(j+1)%pts.length];if(segIntersect(a1.x,a1.y,a2.x,a2.y,b1.x,b1.y,b2.x,b2.y))return true;}}return false;}
+function lineMetrics(line,pg=curPage){const scale=getScaleForPage(pg),segments=[];let ptDist=0;for(const seg of lineSegments(line)){const d=Math.hypot(seg.b.x-seg.a.x,seg.b.y-seg.a.y);ptDist+=d;segments.push({...seg,ptDist:d,dist:scale?d/scale.pts_per_m:null});}return{ptDist,dist:scale?ptDist/scale.pts_per_m:null,segments,scale};}
+function polyMetrics(poly,pg=curPage){const pts=poly.pts||[];if(pts.length<3||polySelfIntersects(pts))return{area:null,scale:getScaleForPage(pg)};const scale=getScaleForPage(pg);let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}const ptArea=Math.abs(a)/2;return{area:scale?ptArea/(scale.pts_per_m**2):null,scale};}
+function polyEdgesPdf(poly){const pts=poly?.pts||[],out=[];if(!poly?.closed||pts.length<3)return out;for(let i=0;i<pts.length;i++)out.push({a:pts[i],b:pts[(i+1)%pts.length]});return out;}
+function normalizeLandEdgeTag(tag,idx=0){const role=tag?.role||tag?.type||"neighbor";return{label:tag?.label||LAND_EDGE_DEFAULT_LABELS[idx]||`ด้าน ${idx+1}`,role,type:role,note:tag?.note||""};}
+function ensureLandEdgeTags(poly){if(!poly||poly.areaType!=="land")return[];const n=(poly.pts||[]).length;if(!Array.isArray(poly.edgeTags))poly.edgeTags=[];for(let i=0;i<n;i++)poly.edgeTags[i]=normalizeLandEdgeTag(poly.edgeTags[i],i);poly.edgeTags=poly.edgeTags.slice(0,n);return poly.edgeTags;}
+function landEdgeRole(tag){return tag?.role||tag?.type||"neighbor";}
+function landEdgeLabel(tag){return LAND_EDGE_TYPES[landEdgeRole(tag)]||LAND_EDGE_TYPES.neighbor;}
+function landEdgeDisplay(tag,idx=0){const label=tag?.label||LAND_EDGE_DEFAULT_LABELS[idx]||`ด้าน ${idx+1}`;return `${label} · ${landEdgeLabel(tag)}`;}
+function landEdgeColor(tag){return LAND_EDGE_COLORS[landEdgeRole(tag)]||LAND_EDGE_COLORS.neighbor;}
+function buildLandEdgeTypeButtons(){const wrap=document.getElementById("land-edge-types");if(!wrap)return;wrap.innerHTML=Object.entries(LAND_EDGE_TYPES).map(([k,v])=>`<button class="edge-btn${landEdgeState.type===k?" sel":""}" onclick="selectLandEdgeType('${k}')">${v}</button>`).join("");}
+function selectLandEdgeType(type){landEdgeState.type=type;buildLandEdgeTypeButtons();}
+function openLandEdgePanel(polyIdx){const poly=mPolys[polyIdx];if(!poly||poly.areaType!=="land")return false;ensureLandEdgeTags(poly);landEdgeState={open:true,polyIdx,edgeIdx:null,type:"neighbor"};document.getElementById("land-edge-panel").style.display="block";document.getElementById("land-edge-note").value="";document.getElementById("land-edge-meta").textContent="คลิกเส้นขอบที่ดินที่ต้องการ tag";buildLandEdgeTypeButtons();setStatus("กำหนดด้านที่ดิน: คลิก edge แล้วเลือกชนิดด้าน");redraw();return true;}
+function openSelectedLandEdgePanel(){if(selItem?.type==="poly"&&mPolys[selItem.idx]?.areaType==="land"){openLandEdgePanel(selItem.idx);return;}const idx=mPolys.findIndex(p=>p.closed&&p.areaType==="land");if(idx>=0){selItem={type:"poly",idx};openLandEdgePanel(idx);return;}alert("ยังไม่มี polygon ที่ดินบนหน้านี้");}
+function closeLandEdgePanel(){landEdgeState={open:false,polyIdx:null,edgeIdx:null,type:"neighbor"};document.getElementById("land-edge-panel").style.display="none";saveCurrentPage();setStatus("บันทึก tag ด้านที่ดินแล้ว");redraw();}
+function findLandEdgeAt(cx,cy){const THR=Math.max(8,10/zoom);const target=landEdgeState.polyIdx!=null?[landEdgeState.polyIdx]:mPolys.map((_,i)=>i);let best=null,bd=THR;for(const i of target){const poly=mPolys[i];if(!poly||poly.areaType!=="land"||!poly.closed)continue;const pts=poly.pts||[];for(let e=0;e<pts.length;e++){const a=pdfToC(pts[e].x,pts[e].y),b=pdfToC(pts[(e+1)%pts.length].x,pts[(e+1)%pts.length].y);const d=distToSeg(cx,cy,a.x,a.y,b.x,b.y);if(d<bd){bd=d;best={polyIdx:i,edgeIdx:e};}}}return best;}
+function selectLandEdge(polyIdx,edgeIdx){const poly=mPolys[polyIdx];if(!poly)return;const tags=ensureLandEdgeTags(poly),tag=tags[edgeIdx]||normalizeLandEdgeTag(null,edgeIdx);landEdgeState.polyIdx=polyIdx;landEdgeState.edgeIdx=edgeIdx;landEdgeState.type=landEdgeRole(tag);document.getElementById("land-edge-note").value=tag.note||"";document.getElementById("land-edge-meta").textContent=`ด้าน ${edgeIdx+1}: ${landEdgeDisplay(tag,edgeIdx)}`;buildLandEdgeTypeButtons();redraw();}
+function applyLandEdgeTag(){const{polyIdx,edgeIdx,type}=landEdgeState;if(polyIdx==null||edgeIdx==null){setStatus("คลิกเลือก edge ที่ดินก่อน");return;}const poly=mPolys[polyIdx],tags=ensureLandEdgeTags(poly),prev=tags[edgeIdx]||normalizeLandEdgeTag(null,edgeIdx);tags[edgeIdx]={label:prev.label||LAND_EDGE_DEFAULT_LABELS[edgeIdx]||`ด้าน ${edgeIdx+1}`,role:type,type,note:document.getElementById("land-edge-note").value.trim()};document.getElementById("land-edge-meta").textContent=`ด้าน ${edgeIdx+1}: ${landEdgeDisplay(tags[edgeIdx],edgeIdx)}`;saveCurrentPage();buildRightPanel();setStatus(`tag ด้าน ${edgeIdx+1}: ${landEdgeLabel(tags[edgeIdx])}`);redraw();}
+function drawLandEdgeOverlays(){for(let pi=0;pi<mPolys.length;pi++){const poly=mPolys[pi];if(!poly?.closed||poly.areaType!=="land")continue;const tags=ensureLandEdgeTags(poly),cp=poly.pts.map(p=>pdfToC(p.x,p.y));for(let i=0;i<cp.length;i++){const j=(i+1)%cp.length,tag=tags[i],mx=(cp[i].x+cp[j].x)/2,my=(cp[i].y+cp[j].y)/2,col=landEdgeColor(tag);ctx.save();ctx.strokeStyle=col;ctx.lineWidth=(landEdgeState.open&&landEdgeState.polyIdx===pi&&landEdgeState.edgeIdx===i)?Math.max(4,5/zoom):Math.max(2,3/zoom);ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(cp[i].x,cp[i].y);ctx.lineTo(cp[j].x,cp[j].y);ctx.stroke();ctx.restore();drawEdgeLbl(mx,my,landEdgeDisplay(tag,i));if(tag.note)drawEdgeLbl(mx,my+14/zoom,tag.note);}}}
+function getPageOrientation(pg=curPage){const key=String(pg);if(!siteOrientation[key])siteOrientation[key]={};return siteOrientation[key];}
+function getPageNorth(pg=curPage){return getPageOrientation(pg).north||null;}
+function northAngleDeg(p1,p2){const deg=Math.atan2(p2.x-p1.x,p1.y-p2.y)*180/Math.PI;return Math.round((((deg%360)+360)%360)*10)/10;}
+function setPageNorth(p1,p2){const dist=Math.hypot(p2.x-p1.x,p2.y-p1.y);if(dist<0.01){setStatus("ทิศเหนือสั้นเกินไป");return false;}const north={x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,angleDeg:northAngleDeg(p1,p2),source:"manual",status:"verified",semanticTag:"north_arrow",useCategory:null};getPageOrientation(curPage).north=north;setStatus(`ตั้งทิศเหนือแล้ว ${north.angleDeg.toFixed(1)}°`);return true;}
+function drawNorthOverlay(){const north=getPageNorth(curPage);if(!north)return;const a=pdfToC(north.x1,north.y1),b=pdfToC(north.x2,north.y2);const dx=b.x-a.x,dy=b.y-a.y,len=Math.max(1,Math.hypot(dx,dy)),ux=dx/len,uy=dy/len;const head=Math.max(12,16/zoom),side=Math.max(6,8/zoom);ctx.save();ctx.strokeStyle="#5ac8fa";ctx.fillStyle="#5ac8fa";ctx.lineWidth=Math.max(2,3/zoom);ctx.setLineDash([]);ctx.globalAlpha=0.95;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-ux*head-uy*side,b.y-uy*head+ux*side);ctx.lineTo(b.x-ux*head+uy*side,b.y-uy*head-ux*side);ctx.closePath();ctx.fill();ctx.globalAlpha=1;drawLbl(b.x,b.y-16/zoom,`N ทิศเหนือ ${north.angleDeg.toFixed(1)}°`);ctx.restore();}
+function nearestOnSegRaw(px,py,x0,y0,x1,y1,clamp=true){const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;if(len2<0.0001)return{x:x0,y:y0,t:0};let t=((px-x0)*dx+(py-y0)*dy)/len2;if(clamp)t=Math.max(0,Math.min(1,t));return{x:x0+t*dx,y:y0+t*dy,t};}
+function nearestLandProjection(pt,lands){
+  let best=null,bestClamped=null,bd=Infinity,bdClamp=Infinity;
+  for(const land of lands){
+    for(const e of polyEdgesPdf(land)){
+      const p=nearestOnSegRaw(pt.x,pt.y,e.a.x,e.a.y,e.b.x,e.b.y,false);
+      if(p.t>=0&&p.t<=1){const d=(p.x-pt.x)*(p.x-pt.x)+(p.y-pt.y)*(p.y-pt.y);if(d<bd){bd=d;best={to:{x:p.x,y:p.y},distPt:Math.sqrt(d),perp:true};}}
+      const c=nearestOnSegRaw(pt.x,pt.y,e.a.x,e.a.y,e.b.x,e.b.y,true);
+      const dc=(c.x-pt.x)*(c.x-pt.x)+(c.y-pt.y)*(c.y-pt.y);if(dc<bdClamp){bdClamp=dc;bestClamped={to:{x:c.x,y:c.y},distPt:Math.sqrt(dc),perp:false};}
+    }
+  }
+  return best||bestClamped;
+}
+function nearestRefProjection(pt){
+  let best=null,bd=Infinity;
+  for(const ref of mRefs){
+    for(const seg of lineSegments(ref)){
+      const hit=nearestOnSegRaw(pt.x,pt.y,seg.a.x,seg.a.y,seg.b.x,seg.b.y,true);
+      const d=(hit.x-pt.x)*(hit.x-pt.x)+(hit.y-pt.y)*(hit.y-pt.y);
+      if(d<bd){
+        bd=d;
+        best={from:{x:pt.x,y:pt.y},to:{x:hit.x,y:hit.y},distPt:Math.sqrt(d),ref};
+      }
+    }
+  }
+  return best;
+}
+function selectedDistancePoints(sel=selItem){
+  const obj=selectedObj(sel);
+  if(!obj)return[];
+  if(sel.type==="parking")return[{x:obj.x,y:obj.y}];
+  if(sel.type==="line"||sel.type==="ref")return linePts(obj);
+  if(sel.type==="poly"||sel.type==="opening"){
+    const pts=obj.pts||[];
+    if(!pts.length)return[];
+    const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length,cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+    return[...pts,{x:cx,y:cy}];
+  }
+  return[];
+}
+function objectDistancePoints(type,obj){
+  if(!obj)return[];
+  if(type==="parking")return[{x:obj.x,y:obj.y,role:"marker"}];
+  if(type==="line"||type==="ref")return linePts(obj).map((p,i)=>({...p,role:`จุด ${i+1}`}));
+  if(type==="poly"||type==="opening"){
+    const pts=obj.pts||[];
+    if(!pts.length)return[];
+    const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length,cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+    return[...pts.map((p,i)=>({...p,role:`มุม ${i+1}`})),{x:cx,y:cy,role:"กึ่งกลาง"}];
+  }
+  return[];
+}
+function nearestProjectionOnRef(pt,ref){
+  let best=null,bd=Infinity;
+  for(const seg of lineSegments(ref)){
+    const hit=nearestOnSegRaw(pt.x,pt.y,seg.a.x,seg.a.y,seg.b.x,seg.b.y,true);
+    const d=(hit.x-pt.x)*(hit.x-pt.x)+(hit.y-pt.y)*(hit.y-pt.y);
+    if(d<bd){bd=d;best={from:{x:pt.x,y:pt.y,role:pt.role||""},to:{x:hit.x,y:hit.y},distPt:Math.sqrt(d),ref};}
+  }
+  return best;
+}
+function refDistanceSegmentsForSelection(sel=selItem){
+  if(!showRefDistances||!sel||sel.type==="ref"||!mRefs.length)return[];
+  const hits=[];
+  for(const pt of selectedDistancePoints(sel)){
+    const hit=nearestRefProjection(pt);
+    if(hit&&hit.distPt>0.001)hits.push(hit);
+  }
+  return hits;
+}
+function pageObjectsForReport(store){
+  const out=[];
+  for(const [type,list] of [["parking",store.parking||[]],["poly",store.polys||[]],["opening",store.openings||[]],["line",store.lines||[]]]){
+    list.forEach((obj,idx)=>{
+      if((type==="poly"||type==="opening")&&!obj.closed)return;
+      out.push({type,obj,idx,name:obj.name||obj.id||`${type} ${idx+1}`});
+    });
+  }
+  return out;
+}
+function objectLabel(type,obj,idx){
+  if(type==="parking")return `${PARKING_LABELS[obj.parkingType]||obj.parkingType||"ที่จอด"} #${idx+1}`;
+  if(type==="poly")return obj.name||AREA_LABELS[obj.areaType]||`พื้นที่ ${idx+1}`;
+  if(type==="opening")return obj.name||`ช่องว่าง ${idx+1}`;
+  if(type==="line")return obj.kind==="path"?`ระยะต่อเนื่อง ${idx+1}`:`ระยะ ${idx+1}`;
+  return obj.name||`${type} ${idx+1}`;
+}
+function collectRefDistanceReport(){
+  saveCurrentPage();
+  const rows=[];
+  for(const[pgStr,store]of Object.entries(pageStore)){
+    const pg=parseInt(pgStr),refs=store.refs||[],objects=pageObjectsForReport(store),scale=getScaleForPage(pg);
+    for(const ref of refs){
+      for(const item of objects){
+        let best=null;
+        for(const pt of objectDistancePoints(item.type,item.obj)){
+          const hit=nearestProjectionOnRef(pt,ref);
+          if(hit&&(!best||hit.distPt<best.distPt))best=hit;
+        }
+        if(best)rows.push({pg,pageName:pageNames[pg]||`หน้า ${pg}`,tag:pageTags[pg]||"",refName:ref.name||REF_LABELS[ref.refType]||"เส้นอ้างอิง",refType:ref.refType||"custom",objectType:item.type,objectName:objectLabel(item.type,item.obj,item.idx),pointRole:best.from.role,distPt:best.distPt,dist:scale?best.distPt/scale.pts_per_m:null,unit:scale?"ม.":"pt"});
+      }
+    }
+  }
+  return rows.sort((a,b)=>a.pg-b.pg||a.refName.localeCompare(b.refName)||a.objectName.localeCompare(b.objectName));
+}
+function setbackSegments(){
+  const lands=mPolys.filter(p=>p.closed&&p.areaType==="land"),buildings=mPolys.filter(p=>p.closed&&p.areaType==="building");
+  if(!lands.length||!buildings.length)return[];
+  const out=[];
+  for(const bld of buildings){
+    const pts=bld.pts||[];
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i],b=pts[(i+1)%pts.length],mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      for(const from of[a,mid,b]){
+        const hit=nearestLandProjection(from,lands);
+        if(hit&&hit.distPt>0.001)out.push({from:{x:from.x,y:from.y},to:hit.to,distPt:hit.distPt,perp:hit.perp});
+      }
+    }
+  }
+  return out;
+}
+let _id=0;function nid(){return++_id;}
+function bumpIdSeed(id){const m=String(id??"").match(/(\d+)$/);if(m)_id=Math.max(_id,parseInt(m[1])||0);}
+function newObjectId(prefix){return`${prefix}-${nid()}`;}
+function ensureObjectId(obj,prefix){if(!obj)return"";if(obj.id!=null&&obj.id!==""){bumpIdSeed(obj.id);return String(obj.id);}obj.id=newObjectId(prefix);return obj.id;}
+function isAreaSemanticTag(tag){return AREA_SEMANTIC_TAGS.has(tag);}
+function defaultSemanticTag(type,obj={}){
+  if(type==="poly"){
+    const areaType=obj.areaType||"room";
+    if(areaType==="land")return"site_boundary";
+    if(areaType==="building"||areaType==="gfa")return"gross_floor_area";
+    if(areaType==="non_gfa")return"floor_area";
+    return areaTypeLayer(areaType)==="base_area"?"gross_floor_area":"use_area";
+  }
+  if(type==="opening")return"deduction_opening";
+  if(type==="ref")return"reference_line";
+  if(type==="line")return obj.semanticRole==="scale"?"scale_line":"dimension_line";
+  if(type==="parking")return"review_note";
+  if(type==="north")return"north_arrow";
+  if(type==="label")return"label";
+  console.warn("Unknown object type for semanticTag",type,obj);
+  return"review_note";
+}
+function normalizeSemanticFields(obj,type){
+  if(!obj)return obj;
+  if(!obj.semanticTag)obj.semanticTag=defaultSemanticTag(type,obj);
+  if(!isAreaSemanticTag(obj.semanticTag))obj.useCategory=null;
+  else if(!Object.prototype.hasOwnProperty.call(obj,"useCategory"))obj.useCategory=null;
+  return obj;
+}
+function semanticOptionsFor(sel,obj){
+  if(sel?.type==="poly"){
+    const tags=obj?.areaType==="land"?["site_boundary","gross_floor_area","floor_area","use_area"]:["gross_floor_area","floor_area","use_area","site_boundary"];
+    return tags.includes(obj?.semanticTag)?tags:[obj?.semanticTag||defaultSemanticTag("poly",obj),...tags].filter(Boolean);
+  }
+  if(sel?.type==="opening")return["deduction_opening","void"];
+  if(sel?.type==="ref")return["reference_line","road_line","frontage_line","dimension_line"];
+  if(sel?.type==="line")return["dimension_line","scale_line","reference_line"];
+  if(sel?.type==="parking")return["review_note"];
+  return[obj?.semanticTag||"review_note"];
+}
+function ensureStoreObjectIds(store){
+  if(!store)return;
+  store.lines=store.lines||[];store.polys=store.polys||[];store.openings=store.openings||[];store.refs=store.refs||[];store.parking=store.parking||[];
+  store.lines.forEach(o=>{ensureObjectId(o,"line");normalizeSemanticFields(o,"line");});
+  store.polys.forEach(o=>{ensureObjectId(o,"area");normalizeSemanticFields(o,"poly");if(o.areaType==="land")ensureLandEdgeTags(o);});
+  store.openings.forEach(o=>{ensureObjectId(o,"opening");normalizeSemanticFields(o,"opening");});
+  store.refs.forEach(o=>{ensureObjectId(o,"ref");normalizeSemanticFields(o,"ref");});
+  store.parking.forEach(o=>{ensureObjectId(o,"parking");normalizeSemanticFields(o,"parking");});
+  linkOpeningsInStore(store);
+}
+function normalizeCurrentObjects(){const s={lines:mLines,polys:mPolys,openings:mOpenings,refs:mRefs,parking:mParking};ensureStoreObjectIds(s);mLines=s.lines;mPolys=s.polys;mOpenings=s.openings;mRefs=s.refs;mParking=s.parking;}
+function normalizeAllObjects(){saveCurrentPage();for(const store of Object.values(pageStore))ensureStoreObjectIds(store);for(const orient of Object.values(siteOrientation||{})){if(orient?.north)normalizeSemanticFields(orient.north,"north");}}
+function openingProbePoints(op){const pts=op?.pts||[];if(!pts.length)return[];const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length,cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;return[...pts,{x:cx,y:cy}];}
+function openingInsidePoly(op,poly){if(!op?.closed||!poly?.closed||(op.pts||[]).length<3||(poly.pts||[]).length<3)return false;return openingProbePoints(op).every(p=>ptInPoly(p.x,p.y,poly.pts));}
+function openingParentCandidates(op,polys){return(polys||[]).filter(p=>openingInsidePoly(op,p));}
+function linkOpeningParent(op,polys){
+  const existing=op.parentId?polys.find(p=>String(p.id)===String(op.parentId)):null;
+  if(existing&&openingInsidePoly(op,existing)){op.parentStatus="linked";op.parentCandidateIds=[existing.id];return existing;}
+  const candidates=openingParentCandidates(op,polys);
+  op.parentCandidateIds=candidates.map(p=>p.id);
+  if(candidates.length===1){op.parentId=candidates[0].id;op.parentStatus="linked";return candidates[0];}
+  delete op.parentId;op.parentStatus=candidates.length>1?"ambiguous":"unlinked";return null;
+}
+function linkOpeningsInStore(store){const polys=(store?.polys||[]).filter(p=>p.closed);for(const op of(store?.openings||[])){if(op.closed)linkOpeningParent(op,polys);}}
+// ══════════════════════════════════════════════════════
+// Redraw
+// ══════════════════════════════════════════════════════
+function redraw(){if(!bgImg)return;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(bgImg,0,0);const lw=Math.max(1,2/zoom),ds=[8/zoom,4/zoom];mLines.forEach(s=>{const pts=linePts(s),cp=pts.map(p=>pdfToC(p.x,p.y));const col=s.color||"#ffd60a",opa=s.opacity??0.85;const metrics=lineMetrics(s);ctx.save();ctx.globalAlpha=opa;ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash(ds);ctx.stroke();ctx.restore();metrics.segments.forEach((seg,i)=>{const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);const lbl=seg.dist!=null?seg.dist.toFixed(2)+" ม.":seg.ptDist.toFixed(1)+" pt";drawLbl((a.x+b.x)/2,(a.y+b.y)/2,lbl);});if(metrics.segments.length>1){const last=cp[cp.length-1];const total=metrics.dist!=null?metrics.dist.toFixed(2)+" ม.":metrics.ptDist.toFixed(1)+" pt";drawLbl(last.x,last.y-14/zoom,"รวม "+total);}});drawRefLines();drawParking();mPolys.forEach((poly,pi)=>{if(poly.pts.length<2)return;const layer=areaTypeLayer(poly.areaType);if(!layerVis[layer])return;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));const col=poly.color||"#30d158",opa=poly.opacity??0.85;const isSel=selItem?.type==="poly"&&selItem?.idx===pi;const isBase=layer==="base_area";const fillOpa=isBase?0.04:0.10;const sw=isBase?Math.max(2,2.5/zoom):lw;ctx.save();ctx.globalAlpha=opa;ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(poly.closed)ctx.closePath();ctx.strokeStyle=col;ctx.lineWidth=sw;ctx.setLineDash([]);ctx.stroke();if(poly.closed){ctx.fillStyle=hexAlpha(col,fillOpa);ctx.fill();}ctx.restore();if(poly.closed){const metrics=polyMetrics(poly);const cx2=cp.reduce((s,p)=>s+p.x,0)/cp.length,cy2=cp.reduce((s,p)=>s+p.y,0)/cp.length;drawPolyLabel(cx2,cy2,poly.name,metrics.area,poly.areaType,polyCanvasAreaPx(cp),isSel,poly.label?.mode||"auto");const scale=getScaleForPage(curPage);if(scale){for(let i=0;i<cp.length;i++){const j=(i+1)%cp.length;const mx=(cp[i].x+cp[j].x)/2,my=(cp[i].y+cp[j].y)/2;const dist=Math.hypot(poly.pts[j].x-poly.pts[i].x,poly.pts[j].y-poly.pts[i].y)/scale.pts_per_m;drawEdgeLbl(mx,my,dist.toFixed(2)+" ม.");}}}});if(layerVis.deduction)mOpenings.forEach((op,oi)=>{if(op.pts.length<2)return;const cp=op.pts.map(p=>pdfToC(p.x,p.y));const col=op.color||"#ff453a",opa=op.opacity??0.5;const isSel=selItem?.type==="opening"&&selItem?.idx===oi;ctx.save();ctx.globalAlpha=opa;ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(op.closed)ctx.closePath();ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash([5/zoom,3/zoom]);ctx.stroke();if(op.closed){ctx.fillStyle=hexAlpha(col,.06);ctx.fill();}ctx.restore();if(op.closed){const cx2=cp.reduce((s,p)=>s+p.x,0)/cp.length,cy2=cp.reduce((s,p)=>s+p.y,0)/cp.length;const area=polyAreaM2(op.pts);drawPolyLabel(cx2,cy2,op.name||"ช่องว่าง",area,"opening",polyCanvasAreaPx(cp),isSel,op.label?.mode||"auto");const scale=getScaleForPage(curPage);if(scale){for(let i=0;i<cp.length;i++){const j=(i+1)%cp.length;const mx=(cp[i].x+cp[j].x)/2,my=(cp[i].y+cp[j].y)/2;const dist=Math.hypot(op.pts[j].x-op.pts[i].x,op.pts[j].y-op.pts[i].y)/scale.pts_per_m;drawEdgeLbl(mx,my,dist.toFixed(2)+" ม.");}}}});drawLandEdgeOverlays();drawNorthOverlay();drawSetbackLines();if(mPts.length>0){const cp=mPts.map(p=>pdfToC(p.x,p.y));ctx.save();ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.strokeStyle=mode==="north"?"#5ac8fa":curColor;ctx.lineWidth=lw;ctx.setLineDash([6/zoom,3/zoom]);ctx.stroke();const gp=guidePoint||snapTarget;if(gp){ctx.beginPath();ctx.moveTo(cp[cp.length-1].x,cp[cp.length-1].y);ctx.lineTo(gp.x,gp.y);ctx.strokeStyle=mode==="north"?"#5ac8fa":curColor;ctx.globalAlpha=gp.t?0.9:0.72;ctx.lineWidth=Math.max(lw,2/zoom);ctx.setLineDash([5/zoom,4/zoom]);ctx.stroke();ctx.globalAlpha=1;}ctx.restore();cp.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4/zoom,0,Math.PI*2);ctx.fillStyle=mode==="north"?"#5ac8fa":curColor;ctx.fill();});if(mode==="area"&&cp.length>=2&&snapTarget?.t==="close"){ctx.save();ctx.beginPath();ctx.arc(cp[0].x,cp[0].y,10/zoom,0,Math.PI*2);ctx.strokeStyle="#30d158";ctx.lineWidth=2/zoom;ctx.setLineDash([]);ctx.globalAlpha=0.8;ctx.stroke();ctx.globalAlpha=0.12;ctx.fillStyle="#30d158";ctx.fill();ctx.restore();}}calibPts.forEach(p=>{ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,8,0,Math.PI*2);ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fillStyle="#bf5af2";ctx.fill();ctx.restore();});if(calibPts.length===2){ctx.save();ctx.beginPath();ctx.moveTo(calibPts[0].x,calibPts[0].y);ctx.lineTo(calibPts[1].x,calibPts[1].y);ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.setLineDash([10,5]);ctx.stroke();ctx.restore();}if(snapTarget&&snapTarget.t&&mode!=="pan"&&mode!=="sel"){const col=SNAP_COLORS[snapTarget.t]||"#ffd60a";const sx=snapTarget.x,sy=snapTarget.y;const r=7/zoom;ctx.save();ctx.strokeStyle=col;ctx.lineWidth=1.8/zoom;ctx.setLineDash([]);if(snapTarget.t==="ep")ctx.strokeRect(sx-r,sy-r,r*2,r*2);else if(snapTarget.t==="mp"){ctx.beginPath();ctx.moveTo(sx,sy-r);ctx.lineTo(sx+r,sy);ctx.lineTo(sx,sy+r);ctx.lineTo(sx-r,sy);ctx.closePath();ctx.stroke();}else if(snapTarget.t==="ct"){ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(sx-r,sy);ctx.lineTo(sx+r,sy);ctx.moveTo(sx,sy-r);ctx.lineTo(sx,sy+r);ctx.stroke();}else if(snapTarget.t==="nl"){ctx.beginPath();ctx.moveTo(sx-r,sy-r);ctx.lineTo(sx+r,sy+r);ctx.moveTo(sx+r,sy-r);ctx.lineTo(sx-r,sy+r);ctx.stroke();}else if(snapTarget.t==="ix"){ctx.beginPath();ctx.moveTo(sx-r,sy);ctx.lineTo(sx+r,sy);ctx.moveTo(sx,sy-r);ctx.lineTo(sx,sy+r);ctx.stroke();}else if(snapTarget.t==="close"){ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(sx,sy,r*0.45,0,Math.PI*2);ctx.fillStyle=col;ctx.globalAlpha=0.7;ctx.fill();}ctx.restore();}drawRefDistanceForSelection();if((shiftDown||orthoMode)&&mPts.length>0&&["dist","path","ref","area"].includes(mode)){const last=mPts[mPts.length-1];const lastC=pdfToC(last.x,last.y);ctx.save();ctx.strokeStyle="rgba(100,200,255,0.45)";ctx.lineWidth=1/zoom;ctx.setLineDash([6/zoom,4/zoom]);ctx.beginPath();ctx.moveTo(0,lastC.y);ctx.lineTo(canvas.width,lastC.y);ctx.stroke();ctx.beginPath();ctx.moveTo(lastC.x,0);ctx.lineTo(lastC.x,canvas.height);ctx.stroke();ctx.restore();}if(selItem&&mode==="sel")drawSelHighlight(selItem);updateDrawBar();}
+function selectedObj(sel){if(!sel)return null;if(sel.type==="line")return mLines[sel.idx]||null;if(sel.type==="poly")return mPolys[sel.idx]||null;if(sel.type==="opening")return mOpenings[sel.idx]||null;if(sel.type==="ref")return mRefs[sel.idx]||null;if(sel.type==="parking")return mParking[sel.idx]||null;return null;}
+function escHtml(v){return String(v??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));}
+function objLayerKey(sel,obj){if(!sel)return"";if(sel.type==="poly")return areaTypeLayer(obj?.areaType);if(sel.type==="opening")return"deduction";if(sel.type==="ref")return"reference_geometry";if(sel.type==="line")return"dimensions";if(sel.type==="parking")return"parking_area";return"";}
+function objLayerLabel(key){return{base_area:"พื้นที่หลัก",sub_area:"พื้นที่ย่อย",deduction:"ช่องว่าง",reference_geometry:"เส้นอ้างอิง",dimensions:"ระยะ",parking_area:"ที่จอด",labels:"ป้าย"}[key]||key||"—";}
+function objDisplayName(sel,obj){if(!obj)return"—";if(obj.name)return obj.name;if(sel.type==="poly")return AREA_LABELS[obj.areaType]||"พื้นที่";if(sel.type==="opening")return"ช่องว่าง";if(sel.type==="ref")return REF_LABELS[obj.refType]||"เส้นอ้างอิง";if(sel.type==="line")return obj.kind==="path"?"ระยะต่อเนื่อง":"ระยะ";if(sel.type==="parking")return PARKING_LABELS[obj.parkingType]||"ที่จอด";return sel.type;}
+function objMetricText(sel,obj){if(!obj)return"";if(sel.type==="poly"){const m=polyMetrics(obj,curPage);return m.area!=null?m.area.toFixed(2)+" ตร.ม.":"no scale";}if(sel.type==="opening"){const a=polyAreaM2(obj.pts);return a!=null?"-"+a.toFixed(2)+" ตร.ม.":"no scale";}if(sel.type==="line"||sel.type==="ref"){const m=lineMetrics(obj,curPage);return m.dist!=null?m.dist.toFixed(2)+" ม.":m.ptDist.toFixed(1)+" pt";}if(sel.type==="parking")return(obj.count||1)+" คัน";return"";}
+function selectedOpeningAreaFor(poly){if(!poly?.id)return 0;let sum=0;for(const op of mOpenings){if(op.parentId!==poly.id)continue;const a=polyAreaM2(op.pts);if(a!=null)sum+=a;}return sum;}
+function parentNameForOpening(op){const p=mPolys.find(poly=>String(poly.id)===String(op?.parentId));return p?objDisplayName({type:"poly",idx:mPolys.indexOf(p)},p):"";}
+function buildOrientationPanelHtml(){const north=getPageNorth(curPage);const summary=north?`<div class="north-summary"><b>N / ทิศเหนือ</b><br>angle ${north.angleDeg.toFixed(1)}° · ${escHtml(north.source||"manual")} · ${escHtml(north.status||"verified")}</div>`:`<div class="north-summary">หน้านี้ยังไม่ได้ตั้งทิศเหนือ</div>`;return`<div class="rp-section" id="rp-orientation-section"><div class="rp-title">Orientation</div>${summary}<div class="rp-inline-actions"><button class="tb" id="rp-btn-north" onclick="setMode('north')">ตั้งทิศเหนือ</button></div></div>`;}
+function buildParcelSideEditorHtml(poly){const tags=ensureLandEdgeTags(poly);const opts=(selected)=>Object.entries(LAND_EDGE_TYPES).map(([k,l])=>`<option value="${k}" ${landEdgeRole({type:selected})===k?"selected":""}>${escHtml(l)}</option>`).join("");const rows=tags.map((tag,i)=>`<div class="rp-side-card"><div class="rp-side-head"><span>${i+1}</span><span>${escHtml(landEdgeDisplay(tag,i))}</span></div><div class="rp-side-fields"><input id="rp-side-label-${i}" value="${escHtml(tag.label||"")}" placeholder="label เช่น ด้านหน้า" onchange="rpSetLandEdgeField(${i},'label',this.value)"><select id="rp-side-role-${i}" onchange="rpSetLandEdgeField(${i},'role',this.value)">${opts(landEdgeRole(tag))}</select><input id="rp-side-note-${i}" value="${escHtml(tag.note||"")}" placeholder="note เช่น ถนน 8.00 ม." onchange="rpSetLandEdgeField(${i},'note',this.value)"></div></div>`).join("");return`<div class="rp-section" id="rp-parcel-sides"><div class="rp-title">ข้อมูลด้านที่ดิน</div><div class="rp-empty" style="margin-bottom:8px">แก้ label, role และ note ได้ตามจำนวนด้านของ polygon</div><div class="rp-side-list">${rows}</div></div>`;}
+function rightPanelLayerCount(k){if(k==="base_area")return mPolys.filter(p=>areaTypeLayer(p.areaType)==="base_area").length;if(k==="sub_area")return mPolys.filter(p=>areaTypeLayer(p.areaType)==="sub_area").length;if(k==="deduction")return mOpenings.length;if(k==="reference_geometry")return mRefs.length+mLines.length;if(k==="labels")return mPolys.length+mOpenings.length+mRefs.length+mLines.length+mParking.length;return 0;}
+function buildRightPanel(){normalizeCurrentObjects();const content=document.getElementById("rp-content");if(!content)return;const layerColors={base_area:"#30d158",sub_area:"#0a84ff",deduction:"#ff453a",reference_geometry:"#5ac8fa",labels:"#ffd60a"};const layerRows=[["base_area","พื้นที่หลัก"],["sub_area","พื้นที่ย่อย"],["deduction","ช่องว่าง"],["reference_geometry","เส้นอ้างอิง"],["labels","ป้าย"]].map(([k,l])=>`<div class="rp-layer-row"><span class="rp-layer-dot" style="background:${layerColors[k]}"></span><span style="color:${layerVis[k]?'var(--text)':'var(--text3)'}">${l}</span><span class="rp-layer-count" title="object count">${rightPanelLayerCount(k)}</span><button class="rp-icon-btn ${layerVis[k]?'':'off'}" onclick="toggleLayer('${k}')" title="แสดง/ซ่อน">${layerVis[k]?'👁':'—'}</button>${k==="labels"?'<span></span>':`<button class="rp-icon-btn ${layerLock[k]?'locked':''}" onclick="toggleLayerLock('${k}')" title="ล็อก layer">${layerLock[k]?'🔒':'🔓'}</button>`}</div>`).join("");
+  let html=`<div class="rp-tabs"><div class="rp-tab active">Layers</div><div class="rp-tab muted">Visibility</div><div class="rp-tab muted">Lock</div></div><div class="rp-section" id="rp-layers-section"><div class="rp-title">Layers</div>${layerRows}</div>${buildOrientationPanelHtml()}<div class="rp-compat-note">Legacy / Compatibility: selected object editing and Object Tree remain available below while Layers stays first.</div>`;
+  const sel=selItem,obj=selectedObj(sel);if(sel&&obj){const layer=objLayerKey(sel,obj),locked=!!layerLock[layer];html+=`<div class="rp-section rp-compat-section" id="rp-properties-section"><div class="rp-title">Legacy / Compatibility - Properties</div><div class="rp-prop-grid"><label>Object</label><div>${escHtml(sel.type)} ${sel.idx+1}<br><small>${escHtml(obj.id||"")}</small></div><label>Name</label><input value="${escHtml(obj.name||"")}" onchange="rpSetName(this.value)" placeholder="${escHtml(objDisplayName(sel,obj))}"><label>Layer</label><div>${objLayerLabel(layer)}${locked?" · locked":""}</div>`;
+    if(sel.type==="poly"){const opts=Object.entries(AREA_LABELS).map(([k,l])=>`<option value="${k}" ${obj.areaType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Type</label><select onchange="rpSetAreaType(this.value)">${opts}</select>`;}
+    if(sel.type==="ref"){const opts=Object.entries(REF_LABELS).map(([k,l])=>`<option value="${k}" ${obj.refType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Ref type</label><select onchange="rpSetRefType(this.value)">${opts}</select>`;}
+    if(sel.type==="parking"){const opts=Object.entries(PARKING_LABELS).map(([k,l])=>`<option value="${k}" ${obj.parkingType===k?"selected":""}>${escHtml(l)}</option>`).join("");html+=`<label>Parking</label><select onchange="rpSetParkingType(this.value)">${opts}</select>`;}
+    if(sel.type==="opening"){const pName=parentNameForOpening(obj);html+=`<label>Parent</label><div>${pName?escHtml(pName):escHtml(obj.parentStatus||"unlinked")}</div>`;}
+    const semOpts=semanticOptionsFor(sel,obj).map(k=>`<option value="${k}" ${obj.semanticTag===k?"selected":""}>${escHtml(SEMANTIC_TAG_LABELS[k]||k)}</option>`).join("");
+    const useEnabled=isAreaSemanticTag(obj.semanticTag);
+    const useOpts=`<option value="" ${obj.useCategory==null?"selected":""}>—</option>`+Object.entries(USE_CATEGORY_LABELS).map(([k,l])=>`<option value="${k}" ${obj.useCategory===k?"selected":""}>${escHtml(l)}</option>`).join("");
+    html+=`<label>Color</label><input type="color" value="${escHtml(obj.color||curColor)}" onchange="rpSetColor(this.value)"><label>Opacity</label><input type="range" min="10" max="100" value="${Math.round((obj.opacity??curOpacity)*100)}" onchange="rpSetOpacity(this.value)"><label>Label</label><select onchange="rpSetLabelMode(this.value)"><option value="auto" ${(obj.label?.mode||"auto")==="auto"?"selected":""}>auto</option><option value="hidden" ${obj.label?.mode==="hidden"?"selected":""}>hidden</option></select><label>Semantic Tag</label><select id="rp-semantic-tag" onchange="rpSetSemanticTag(this.value)">${semOpts}</select><label>Use Category</label><select id="rp-use-category" onchange="rpSetUseCategory(this.value)" ${useEnabled?"":"disabled"}>${useOpts}</select></div>`;
+    if(sel.type==="poly"){const gross=polyMetrics(obj,curPage).area,open=selectedOpeningAreaFor(obj),net=gross!=null?gross-open:null;html+=`<div class="rp-metric"><span>Gross</span><b>${gross!=null?gross.toFixed(2)+" ตร.ม.":"—"}</b></div><div class="rp-metric"><span>Opening</span><b>${open.toFixed(2)} ตร.ม.</b></div><div class="rp-metric"><span>Net</span><b>${net!=null?net.toFixed(2)+" ตร.ม.":"—"}</b></div>`;if(obj.areaType==="land")html+=buildParcelSideEditorHtml(obj);}
+    else html+=`<div class="rp-metric"><span>Value</span><b>${escHtml(objMetricText(sel,obj))}</b></div>`;
+    html+=`</div>`;
+  }else html+=`<div class="rp-section rp-compat-section" id="rp-properties-section"><div class="rp-title">Legacy / Compatibility - Properties</div><div class="rp-empty">เลือก object จาก canvas หรือ tree เพื่อแก้ชื่อ สี opacity และชนิดพื้นที่</div></div>`;
+  html+=`<div class="rp-section rp-compat-section" id="rp-object-tree-section"><div class="rp-title">Legacy / Compatibility - Object Tree</div>`;
+  const groups=[{key:"base_area",label:"พื้นที่หลัก",type:"poly",items:mPolys.map((o,i)=>({o,i})).filter(x=>areaTypeLayer(x.o.areaType)==="base_area")},{key:"sub_area",label:"พื้นที่ย่อย",type:"poly",items:mPolys.map((o,i)=>({o,i})).filter(x=>areaTypeLayer(x.o.areaType)==="sub_area")},{key:"deduction",label:"ช่องว่าง",type:"opening",items:mOpenings.map((o,i)=>({o,i}))},{key:"reference_geometry",label:"เส้นอ้างอิง",type:"ref",items:mRefs.map((o,i)=>({o,i}))},{key:"dimensions",label:"ระยะ",type:"line",items:mLines.map((o,i)=>({o,i}))},{key:"parking_area",label:"ที่จอด",type:"parking",items:mParking.map((o,i)=>({o,i}))}];
+  let any=false;for(const g of groups){if(!g.items.length)continue;any=true;html+=`<div class="rp-group">${g.label}</div>`;for(const {o,i} of g.items){const rowSel=selItem?.type===g.type&&selItem?.idx===i;const parent=g.type==="opening"&&o.parentId?`<br><small>↳ ${escHtml(parentNameForOpening(o)||o.parentId)}</small>`:"";html+=`<div class="rp-obj-row ${rowSel?'sel':''}" onclick="selectObjectFromTree('${g.type}',${i},true)"><span>${g.type==="opening"?"🕳":g.type==="ref"?"⌁":g.type==="line"?"📏":g.type==="parking"?"🚗":"⬡"}</span><span class="rp-obj-name">${escHtml(objDisplayName({type:g.type,idx:i},o))}${parent}</span><span class="rp-obj-meta">${escHtml(objMetricText({type:g.type,idx:i},o))}</span></div>`;}}
+  html+=any?`</div>`:`<div class="rp-empty">หน้านี้ยังไม่มี object</div></div>`;content.innerHTML=html;}
+function objectCanvasBounds(sel,obj){let pts=[];if(!obj)return null;if(sel.type==="poly"||sel.type==="opening")pts=(obj.pts||[]).map(p=>pdfToC(p.x,p.y));else if(sel.type==="line"||sel.type==="ref")pts=linePts(obj).map(p=>pdfToC(p.x,p.y));else if(sel.type==="parking"){const c=pdfToC(obj.x,obj.y);pts=[c];}if(!pts.length)return null;const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);return{x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};}
+function focusObject(sel,obj){const b=objectCanvasBounds(sel,obj);if(!b)return;const W=ws.clientWidth,H=ws.clientHeight,bw=Math.max(40,b.x1-b.x0),bh=Math.max(40,b.y1-b.y0);const nz=Math.max(0.08,Math.min(4,Math.min((W-80)/bw,(H-80)/bh)));zoom=nz;panX=Math.round(W/2-((b.x0+b.x1)/2)*zoom);panY=Math.round(H/2-((b.y0+b.y1)/2)*zoom);applyT();}
+function selectObjectFromTree(type,idx,focus=false){setMode("sel");selItem={type,idx};syncColorBar(selItem);const obj=selectedObj(selItem);if(focus)focusObject(selItem,obj);redraw();buildRightPanel();}
+function rpSetName(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.name=v.trim();updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetAreaType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="poly")return;pushUndo();obj.areaType=v;updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetSemanticTag(v){const obj=selectedObj(selItem);if(!obj||!v)return;pushUndo();obj.semanticTag=v;if(!isAreaSemanticTag(v))obj.useCategory=null;else if(!Object.prototype.hasOwnProperty.call(obj,"useCategory"))obj.useCategory=null;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetUseCategory(v){const obj=selectedObj(selItem);if(!obj||!isAreaSemanticTag(obj.semanticTag))return;pushUndo();obj.useCategory=v||null;saveCurrentPage();updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetRefType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="ref")return;pushUndo();obj.refType=v;redraw();buildRightPanel();}
+function rpSetParkingType(v){const obj=selectedObj(selItem);if(!obj||selItem.type!=="parking")return;pushUndo();obj.parkingType=v;updatePageSummary(curPage);redraw();buildRightPanel();}
+function rpSetColor(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.color=v;syncColorBar(selItem);redraw();buildRightPanel();}
+function rpSetOpacity(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.opacity=(+v)/100;syncColorBar(selItem);redraw();buildRightPanel();}
+function rpSetLabelMode(v){const obj=selectedObj(selItem);if(!obj)return;pushUndo();obj.label={...(obj.label||{}),mode:v==="hidden"?"hidden":"auto"};redraw();buildRightPanel();}
+function rpSetLandEdgeField(edgeIdx,field,value){const obj=selectedObj(selItem);if(!obj||selItem.type!=="poly"||obj.areaType!=="land")return;const tags=ensureLandEdgeTags(obj),tag=tags[edgeIdx]||normalizeLandEdgeTag(null,edgeIdx);pushUndo();if(field==="role"){tag.role=value;tag.type=value;}else if(field==="note")tag.note=value.trim();else tag.label=value.trim()||LAND_EDGE_DEFAULT_LABELS[edgeIdx]||`ด้าน ${edgeIdx+1}`;tags[edgeIdx]=normalizeLandEdgeTag(tag,edgeIdx);saveCurrentPage();redraw();buildRightPanel();}
+function drawSelHighlight(sel){const hw=6/zoom;ctx.save();ctx.strokeStyle="#fff";ctx.lineWidth=2/zoom;ctx.setLineDash([6/zoom,3/zoom]);if((sel.type==="line"||sel.type==="ref")&&selectedObj(sel)){const cp=linePts(selectedObj(sel)).map(p=>pdfToC(p.x,p.y));ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.stroke();cp.forEach(p=>{ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);});}else if(sel.type==="parking"&&selectedObj(sel)){const p=selectedObj(sel),c=pdfToC(p.x,p.y);ctx.fillStyle="#fff";ctx.fillRect(c.x-hw,c.y-hw,hw*2,hw*2);ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(c.x-hw,c.y-hw,hw*2,hw*2);}else if((sel.type==="poly"||sel.type==="opening")&&selectedObj(sel)){const poly=selectedObj(sel);const cp=poly.pts.map(p=>pdfToC(p.x,p.y));ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(poly.closed)ctx.closePath();ctx.stroke();cp.forEach(p=>{ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);});}ctx.restore();}
+function lblFs(){return Math.max(10,Math.round(13/zoom));}
+function drawLbl(x,y,t){const fs=lblFs(),pad=Math.round(3/zoom);ctx.save();ctx.font=`bold ${fs}px sans-serif`;const tw=ctx.measureText(t).width;ctx.fillStyle="rgba(0,0,0,.72)";ctx.fillRect(x-tw/2-pad,y-fs*0.85,tw+pad*2,fs*1.25);ctx.fillStyle="#ffffff";ctx.fillText(t,x-tw/2,y+fs*0.3);ctx.restore();}
+function shouldDrawLabelForObject(obj,isSel=false){if(obj?.label?.mode==="hidden")return false;if(!layerVis.labels&&!isSel)return false;return true;}
+function drawPolyLabel(cx2,cy2,name,area,areaType,canvasAreaPx=Infinity,isSel=false,labelMode="auto"){if(labelMode==="hidden")return;if(!layerVis.labels&&!isSel)return;if(zoom<0.2&&!isSel)return;const screenAreaPx=(canvasAreaPx||0)*zoom*zoom;if(screenAreaPx<800&&!isSel)return;const compact=zoom<0.45&&!isSel;const fs=lblFs(),lh=Math.round(fs*1.4),pad=Math.round(4/zoom);ctx.save();ctx.font=`bold ${fs}px sans-serif`;const rows=[];if(!compact&&name)rows.push({t:name,c:areaType==="opening"?"#ff9f0a":"#5ac8fa"});if(!compact&&areaType==="building")rows.push({t:"แนวอาคาร",c:"#ff9f0a"});if(area!=null)rows.push({t:(areaType==="opening"?"−":"")+area.toFixed(2)+" ตร.ม.",c:"#ffffff"});if(!compact&&areaType==="land"&&area!=null)rows.push({t:toRNW(area),c:"#a8e6c0"});if(!rows.length){ctx.restore();return;}const mw=Math.max(...rows.map(r=>ctx.measureText(r.t).width));const bh=rows.length*lh+pad*2;const bx=cx2-mw/2-pad,by=cy2-bh/2;ctx.globalAlpha=isSel?0.95:0.82;ctx.fillStyle="rgba(0,0,0,.78)";ctx.beginPath();if(ctx.roundRect)ctx.roundRect(bx,by,mw+pad*2,bh,Math.round(4/zoom));else ctx.rect(bx,by,mw+pad*2,bh);ctx.fill();ctx.globalAlpha=1;rows.forEach((r,i)=>{const tw=ctx.measureText(r.t).width;ctx.fillStyle=r.c;ctx.fillText(r.t,cx2-tw/2,by+pad+fs*0.9+i*lh);});ctx.restore();}
+function drawEdgeLbl(x,y,t){const fs=Math.max(8,Math.round(10/zoom)),pad=Math.round(2/zoom);ctx.save();ctx.font=`bold ${fs}px sans-serif`;const tw=ctx.measureText(t).width;ctx.fillStyle="rgba(0,0,0,.6)";ctx.fillRect(x-tw/2-pad,y-fs*0.75,tw+pad*2,fs*1.15);ctx.fillStyle="#ffd60a";ctx.fillText(t,x-tw/2,y+fs*0.25);ctx.restore();}
+function drawSetbackLines(){if(!showSetbackDistances)return;const segs=setbackSegments();if(!segs.length)return;const scale=getScaleForPage(curPage),lw=Math.max(1.5,2/zoom),r=Math.max(2.5,3.5/zoom);ctx.save();ctx.strokeStyle="#ff9f0a";ctx.fillStyle="#ff9f0a";ctx.lineWidth=lw;ctx.setLineDash([7/zoom,4/zoom]);ctx.globalAlpha=0.9;for(const s of segs){const a=pdfToC(s.from.x,s.from.y),b=pdfToC(s.to.x,s.to.y);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(a.x,a.y,r,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(b.x,b.y,r*0.8,0,Math.PI*2);ctx.stroke();ctx.setLineDash([7/zoom,4/zoom]);const txt=scale?(s.distPt/scale.pts_per_m).toFixed(2)+" ม.":s.distPt.toFixed(1)+" pt";drawEdgeLbl((a.x+b.x)/2,(a.y+b.y)/2,txt);}ctx.restore();}
+function drawRefLines(){if(!layerVis.reference_geometry)return;const lw=Math.max(1.5,2/zoom);mRefs.forEach(r=>{const pts=linePts(r),cp=pts.map(p=>pdfToC(p.x,p.y));if(cp.length<2)return;const col=r.color||"#5ac8fa";ctx.save();ctx.globalAlpha=r.opacity??0.8;ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash([10/zoom,5/zoom]);ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.stroke();ctx.restore();if(shouldDrawLabelForObject(r,false)){const mid=cp[Math.floor(cp.length/2)];drawLbl(mid.x,mid.y,`${REF_LABELS[r.refType]||"อ้างอิง"}${r.name?": "+r.name:""}`);}});}
+function drawParking(){const r=Math.max(5,6/zoom);mParking.forEach(p=>{const c=pdfToC(p.x,p.y),col=p.color||"#ffcc00";ctx.save();ctx.globalAlpha=p.opacity??0.9;ctx.fillStyle=col;ctx.strokeStyle="#000";ctx.lineWidth=1/zoom;ctx.beginPath();ctx.rect(c.x-r,c.y-r,r*2,r*2);ctx.fill();ctx.stroke();ctx.fillStyle="#000";ctx.font=`bold ${Math.max(8,10/zoom)}px sans-serif`;ctx.fillText("P",c.x-r*0.45,c.y+r*0.4);ctx.restore();});}
+function drawRefDistanceForSelection(){const segs=refDistanceSegmentsForSelection();if(!segs.length)return;const scale=getScaleForPage(curPage),lw=Math.max(1.5,2/zoom),r=Math.max(2.5,3.5/zoom);ctx.save();ctx.strokeStyle="#64d2ff";ctx.fillStyle="#64d2ff";ctx.lineWidth=lw;ctx.setLineDash([5/zoom,4/zoom]);ctx.globalAlpha=0.92;for(const s of segs){const a=pdfToC(s.from.x,s.from.y),b=pdfToC(s.to.x,s.to.y);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(a.x,a.y,r,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(b.x,b.y,r*0.8,0,Math.PI*2);ctx.stroke();ctx.setLineDash([5/zoom,4/zoom]);const txt=scale?(s.distPt/scale.pts_per_m).toFixed(2)+" ม.":s.distPt.toFixed(1)+" pt";drawEdgeLbl((a.x+b.x)/2,(a.y+b.y)/2,txt);}ctx.restore();}
+// ══════════════════════════════════════════════════════
+// Events
+// ══════════════════════════════════════════════════════
+function cXY(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*(canvas.width/r.width),y:(e.clientY-r.top)*(canvas.height/r.height)};}
+function hitVertex(cx,cy){
+  const THR=Math.max(8,10/zoom);
+  const scanPts=(type,list)=>{
+    for(let i=list.length-1;i>=0;i--){
+      const obj=list[i],pts=linePts(obj);
+      for(let v=pts.length-1;v>=0;v--){
+        const c=pdfToC(pts[v].x,pts[v].y);
+        if(Math.hypot(cx-c.x,cy-c.y)<=THR)return{type,idx:i,vertex:v};
+      }
+    }
+    return null;
+  };
+  let hit=null;if(layerVis.reference_geometry&&!layerLock.reference_geometry){hit=scanPts("ref",mRefs);if(hit)return hit;}
+  hit=scanPts("line",mLines);if(hit)return hit;
+  const scanPoly=(type,list)=>{
+    for(let i=list.length-1;i>=0;i--){
+      const pts=list[i].pts||[];
+      for(let v=pts.length-1;v>=0;v--){
+        const c=pdfToC(pts[v].x,pts[v].y);
+        if(Math.hypot(cx-c.x,cy-c.y)<=THR)return{type,idx:i,vertex:v};
+      }
+    }
+    return null;
+  };
+  return scanPoly("opening",mOpenings)||scanPoly("poly",mPolys);
+}
+function finishPathLike(target){
+  if(mPts.length<2){setStatus("ต้องมีอย่างน้อย 2 จุด");return false;}
+  pushUndo();
+  if(target==="ref"){
+    const ref=refObjFromPts(mPts);
+    mRefs.push(ref);
+    document.getElementById("measure-result").textContent=`⌁ ${ref.name} ${lineMetrics(ref).ptDist.toFixed(1)} pt`;
+    openNamePanel("ชื่อเส้นอ้างอิง",(nm)=>{ref.name=nm||ref.name;updatePageSummary(curPage);redraw();buildRightPanel();},ref.name,false);
+  }else{
+    const ln=lineObjFromPts(mPts);
+    const metrics=lineMetrics(ln);
+    mLines.push(ln);
+    const total=metrics.dist!=null?metrics.dist.toFixed(3)+" ม.":metrics.ptDist.toFixed(1)+" pt";
+    document.getElementById("measure-result").textContent=`〽 รวม ${total} · ${metrics.segments.length} ช่วง`;
+  }
+  mPts=[];updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();return true;
+}
+ws.addEventListener("mousedown",e=>{if(e.button===2)return;const{x:cx,y:cy}=cXY(e);if(landEdgeState.open){const edge=findLandEdgeAt(cx,cy);if(edge)selectLandEdge(edge.polyIdx,edge.edgeIdx);else setStatus("คลิกให้ใกล้เส้นขอบ polygon ที่ดิน");return;}if(mode==="sel"){hideObjPicker();const _initDrag=(hit)=>{selItem={type:hit.type,idx:hit.idx};syncColorBar(selItem);buildRightPanel();const pStart=cToPdf(cx,cy);let origData;if(hit.type==="line"||hit.type==="ref"){origData=linePts(selectedObj(selItem)).map(p=>({...p}));}else if(hit.type==="parking"){const p=selectedObj(selItem);origData={x:p.x,y:p.y};}else{origData=selectedObj(selItem).pts.map(p=>({...p}));}pushUndo();dragState={...hit,startPdf:pStart,origData};ws.style.cursor=hit.vertex!=null?"crosshair":"move";setStatus(hit.vertex!=null?`ลากจุด ${hit.vertex+1} ของ object`:"ลาก object ทั้งชิ้น");};const vh=hitVertex(cx,cy);if(vh){_initDrag(vh);}else{const hits=hitTestAll(cx,cy);if(hits.length===0){selItem=null;dragState=null;buildRightPanel();}else if(hits.length===1){_initDrag(hits[0]);}else{showObjPicker(hits,e.clientX,e.clientY);}}redraw();return;}if(mode==="pan"||e.button===1||spaceDown){isPan=true;lastMx=e.clientX;lastMy=e.clientY;ws.style.cursor="grabbing";return;}const sc=snap(cx,cy);if((shiftDown||orthoMode)&&mPts.length>0&&["dist","path","ref","area"].includes(mode)){const last=mPts[mPts.length-1];const lastC=pdfToC(last.x,last.y);const sdx=sc.x-lastC.x,sdy=sc.y-lastC.y;if(Math.abs(sdx)>=Math.abs(sdy))sc.y=lastC.y;else sc.x=lastC.x;}const p=cToPdf(sc.x,sc.y);if(mode==="north"){mPts.push(p);if(mPts.length===1){setStatus("ตั้งทิศเหนือ: คลิกปลายลูกศร N");document.getElementById("measure-result").textContent="N: คลิกปลายลูกศร";}else{pushUndo();if(setPageNorth(mPts[0],mPts[1]))saveCurrentPage();mPts=[];setMode("sel");buildRightPanel();}}else if(mode==="dist"){mPts.push(p);if(mPts.length===1){document.getElementById("measure-result").textContent="• คลิกจุดที่ 2";}else{const ln=lineObjFromPts(mPts);const metrics=lineMetrics(ln);pushUndo();mLines.push(ln);document.getElementById("measure-result").textContent=metrics.dist!=null?"📏 "+metrics.dist.toFixed(3)+" ม.":"📏 "+metrics.ptDist.toFixed(1)+" pt (สอบเทียบก่อน)";mPts=[];updateWorkspaceState();buildRightPanel();}}else if(mode==="path"||mode==="ref"){mPts.push(p);const label=mode==="ref"?"เส้นอ้างอิง":"ระยะต่อเนื่อง";if(mPts.length===1)document.getElementById("measure-result").textContent=`${label}: คลิกจุดถัดไป`;else{const tmp=lineObjFromPts(mPts),metrics=lineMetrics(tmp);const total=metrics.dist!=null?metrics.dist.toFixed(3)+" ม.":metrics.ptDist.toFixed(1)+" pt";document.getElementById("measure-result").textContent=`${label}: รวม ${total} · Enter เพื่อจบ`;}}else if(mode==="parking"){pushUndo();mParking.push({x:p.x,y:p.y,id:nid(),parkingType:curParkingType,count:1,color:curColor||"#ffcc00",opacity:curOpacity});document.getElementById("measure-result").textContent=`🚗 เพิ่มที่จอด ${PARKING_LABELS[curParkingType]||curParkingType} · หน้านี้ ${mParking.length} คัน`;updatePageSummary(curPage);updateWorkspaceState();buildRightPanel();}else if(mode==="area"){if(mPts.length>=2){const c0=pdfToC(mPts[0].x,mPts[0].y);const closeR=closeRadius/Math.max(zoom,0.1);if(sc.t==="close"||Math.hypot(sc.x-c0.x,sc.y-c0.y)<closeR){finishCurrentArea();return;}}mPts.push(p);}else if(mode==="calib"){calibPts.push({x:sc.x,y:sc.y});if(calibPts.length===1){setStatus("คลิกจุดที่ 2…");redraw();return;}if(calibPts.length===2){const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;document.getElementById("calib-line-info").textContent="เส้น "+Math.hypot(dx,dy).toFixed(1)+" pt · ป้อนระยะจริง:";calibPanel.style.display="block";document.getElementById("calib-input").value="";document.getElementById("calib-input").focus();}return;}redraw();});
+ws.addEventListener("contextmenu",e=>{e.preventDefault();const{x:cx,y:cy}=cXY(e);const hit=(mode==="sel"&&selItem)?selItem:findNearest(cx,cy,40);if(!hit){ctxMenu.style.display="none";return;}ctxTarget=hit;if(mode==="sel"){selItem=hit;redraw();}const ctxObj=selectedObj(hit);if(ctxObj){const c=ctxObj.color||curColor,o=Math.round((ctxObj.opacity??curOpacity)*100);document.getElementById("ctx-inp-color").value=c.length===7?c:"#30d158";document.getElementById("ctx-inp-opacity").value=o;document.getElementById("ctx-opacity-val").textContent=o+"%";}document.getElementById("ctx-rename").style.display=(hit.type==="poly"||hit.type==="opening"||hit.type==="ref")?"block":"none";document.getElementById("ctx-land-edges").style.display="none";const mw=200,mh=180;const lx=e.clientX+mw>innerWidth?e.clientX-mw:e.clientX;const ly=e.clientY+mh>innerHeight?e.clientY-mh:e.clientY;ctxMenu.style.left=lx+"px";ctxMenu.style.top=ly+"px";ctxMenu.style.display="block";});
+ctxMenu.addEventListener("click",e=>e.stopPropagation());
+function findNearest(cx,cy,r){let best=null,bd=r;const trySeg=(type,idx,obj)=>{for(const seg of lineSegments(obj)){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);const p=nearestOnSeg(cx,cy,a.x,a.y,b.x,b.y);const d=Math.hypot(cx-p.x,cy-p.y);if(d<bd){bd=d;best={type,idx};}}};mLines.forEach((s,i)=>trySeg("line",i,s));if(layerVis.reference_geometry&&!layerLock.reference_geometry)mRefs.forEach((s,i)=>trySeg("ref",i,s));mParking.forEach((p,i)=>{const c=pdfToC(p.x,p.y);const d=Math.hypot(cx-c.x,cy-c.y);if(d<bd){bd=d;best={type:"parking",idx:i};}});mPolys.forEach((poly,i)=>{if(!poly.closed)return;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));const mx=cp.reduce((s,p)=>s+p.x,0)/cp.length,my=cp.reduce((s,p)=>s+p.y,0)/cp.length;const d=Math.hypot(cx-mx,cy-my);if(d<bd){bd=d;best={type:"poly",idx:i};}});mOpenings.forEach((op,i)=>{if(!op.closed)return;const cp=op.pts.map(p=>pdfToC(p.x,p.y));const mx=cp.reduce((s,p)=>s+p.x,0)/cp.length,my=cp.reduce((s,p)=>s+p.y,0)/cp.length;const d=Math.hypot(cx-mx,cy-my);if(d<bd){bd=d;best={type:"opening",idx:i};}});return best;}
+function ctxColor(c){if(!ctxTarget)return;pushUndo();const obj=selectedObj(ctxTarget);if(obj){obj.color=c;redraw();}curColor=c;document.getElementById("inp-color").value=c.length===7?c:"#30d158";buildRightPanel();}
+function ctxOpacity(v){if(!ctxTarget)return;pushUndo();const obj=selectedObj(ctxTarget);if(obj){obj.opacity=v/100;redraw();}curOpacity=v/100;document.getElementById("ctx-opacity-val").textContent=v+"%";document.getElementById("inp-opacity").value=v;document.getElementById("opacity-val").textContent=v+"%";buildRightPanel();}
+function ctxDelete(){if(!ctxTarget)return;pushUndo();if(ctxTarget.type==="line")mLines.splice(ctxTarget.idx,1);else if(ctxTarget.type==="poly")mPolys.splice(ctxTarget.idx,1);else if(ctxTarget.type==="opening")mOpenings.splice(ctxTarget.idx,1);else if(ctxTarget.type==="ref")mRefs.splice(ctxTarget.idx,1);else if(ctxTarget.type==="parking")mParking.splice(ctxTarget.idx,1);ctxTarget=null;selItem=null;updatePageSummary(curPage);redraw();buildRightPanel();}
+function ctxRename(){if(!ctxTarget)return;pushUndo();if(ctxTarget.type==="poly"){const poly=mPolys[ctxTarget.idx];openNamePanel("เปลี่ยนชื่อ",(nm,type)=>{poly.name=nm;poly.areaType=type||poly.areaType||"room";updatePageSummary(curPage);redraw();buildRightPanel();},poly.name,true,poly.areaType||"room");return;}if(ctxTarget.type==="opening"){const op=mOpenings[ctxTarget.idx];openNamePanel("เปลี่ยนชื่อช่องว่าง",(nm)=>{op.name=nm;updatePageSummary(curPage);redraw();buildRightPanel();},op.name||"",false);return;}if(ctxTarget.type==="ref"){const ref=mRefs[ctxTarget.idx];openNamePanel("เปลี่ยนชื่อเส้นอ้างอิง",(nm)=>{ref.name=nm||ref.name;updatePageSummary(curPage);redraw();buildRightPanel();},ref.name||"",false);}}
+function ctxLandEdges(){if(!ctxTarget||ctxTarget.type!=="poly")return;ctxMenu.style.display="none";openLandEdgePanel(ctxTarget.idx);}
+// ══════════════════════════════════════════════════════
+// Name panel
+// ══════════════════════════════════════════════════════
+function openNamePanel(title,cb,val="",showAType=false,initialAType=null){document.getElementById("name-panel-title").textContent=title;document.getElementById("name-input").value=val;document.getElementById("atype-row").style.display=showAType?"flex":"none";if(showAType)setAType(initialAType||curAType||"room");namePanel.style.display="block";document.getElementById("name-input").focus();nameCb=cb;}
+function finishName(){const v=document.getElementById("name-input").value.trim();namePanel.style.display="none";if(nameCb)nameCb(v,curAType);nameCb=null;}
+function cancelName(){namePanel.style.display="none";if(nameCb)nameCb("",curAType);nameCb=null;}
+document.getElementById("name-input").addEventListener("keydown",e=>{if(e.key==="Enter")finishName();if(e.key==="Escape")cancelName();});
+// ══════════════════════════════════════════════════════
+// Calibrate
+// ══════════════════════════════════════════════════════
+function finishCalib(){const dist=parseFloat(document.getElementById("calib-input").value);if(!dist||dist<=0){alert("ระยะต้องมากกว่า 0");return;}if(calibPts.length<2){cancelCalib();return;}const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;const ppm=Math.hypot(dx,dy)/dist;const N=Math.round(1000*(72/25.4)/ppm);const sc={N,label:`★ 1:${N} (สอบเทียบ)`,pts_per_m:ppm,calibrated:true,source:"manual",verified:true};if(!pageData)pageData={};pageData.scale=sc;getStore(curPage).calibScale=sc;updateAnalyseUI(pageData);calibPanel.style.display="none";calibPts=[];setMode("dist");setStatus(`✅ 1:${N} สอบเทียบแล้ว`);updatePageSummary(curPage);redraw();}
+function cancelCalib(){calibPts=[];calibPanel.style.display="none";setMode("pan");}
+// ══════════════════════════════════════════════════════
+// Mouse move
+// ══════════════════════════════════════════════════════
+let loupeR=80,loupeEnabled=false;const loupeEl=document.getElementById("loupe");const loupeCtx=loupeEl.getContext("2d");
+function _loupeSizeApply(){loupeEl.width=loupeR*2;loupeEl.height=loupeR*2;loupeEl.style.width=(loupeR*2)+"px";loupeEl.style.height=(loupeR*2)+"px";}
+_loupeSizeApply();
+function toggleLoupe(){loupeEnabled=!loupeEnabled;document.getElementById("btn-loupe").classList.toggle("active",loupeEnabled);if(!loupeEnabled)loupeEl.style.display="none";setStatus(loupeEnabled?"🔍 แว่นขยาย: เปิด":"🔍 แว่นขยาย: ปิด");}
+function resizeLoupe(delta){loupeR=Math.max(50,Math.min(160,loupeR+delta));_loupeSizeApply();document.getElementById("lbl-loupe-r").textContent=loupeR*2+"px";}
+function updateLoupe(e){const drawingMode=["dist","path","ref","area","calib","parking","north"].includes(mode);if(!loupeEnabled||!drawingMode||!bgImg){loupeEl.style.display="none";return;}const{x:cx,y:cy}=cXY(e);const SW=Math.max(40,Math.min(180,60/Math.max(zoom,0.2)));const sx=cx-SW/2,sy=cy-SW/2;loupeCtx.clearRect(0,0,loupeR*2,loupeR*2);loupeCtx.save();loupeCtx.beginPath();loupeCtx.arc(loupeR,loupeR,loupeR,0,Math.PI*2);loupeCtx.clip();loupeCtx.drawImage(canvas,sx,sy,SW,SW,0,0,loupeR*2,loupeR*2);loupeCtx.restore();loupeCtx.save();loupeCtx.setLineDash([]);loupeCtx.strokeStyle="rgba(255,255,255,0.9)";loupeCtx.lineWidth=3;loupeCtx.beginPath();loupeCtx.moveTo(loupeR,loupeR-16);loupeCtx.lineTo(loupeR,loupeR+16);loupeCtx.moveTo(loupeR-16,loupeR);loupeCtx.lineTo(loupeR+16,loupeR);loupeCtx.stroke();loupeCtx.strokeStyle="rgba(0,0,0,0.85)";loupeCtx.lineWidth=1.5;loupeCtx.beginPath();loupeCtx.moveTo(loupeR,loupeR-16);loupeCtx.lineTo(loupeR,loupeR+16);loupeCtx.moveTo(loupeR-16,loupeR);loupeCtx.lineTo(loupeR+16,loupeR);loupeCtx.stroke();if(snapTarget?.t){const col=SNAP_COLORS[snapTarget.t]||"#fff";const mag=loupeR*2/SW;const lx=(snapTarget.x-sx)*mag;const ly=(snapTarget.y-sy)*mag;loupeCtx.beginPath();loupeCtx.arc(lx,ly,4,0,Math.PI*2);loupeCtx.fillStyle=col;loupeCtx.globalAlpha=0.9;loupeCtx.fill();}loupeCtx.restore();const wsR=ws.getBoundingClientRect();const scx=cx*zoom+panX+wsR.left;const scy=cy*zoom+panY+wsR.top;let lLeft=scx+20,lTop=scy-loupeR*2-10;if(lLeft+loupeR*2>window.innerWidth-10)lLeft=scx-loupeR*2-20;if(lTop<10)lTop=scy+20;loupeEl.style.left=lLeft+"px";loupeEl.style.top=lTop+"px";loupeEl.style.display="block";}
+let rafId=null;
+function handleMouseMove(e){if(isPan){panX+=e.clientX-lastMx;panY+=e.clientY-lastMy;lastMx=e.clientX;lastMy=e.clientY;applyT();return;}if(mode==="sel"){const{x:cx,y:cy}=cXY(e);if(dragState){const cur=cToPdf(cx,cy);const dx=cur.x-dragState.startPdf.x,dy=cur.y-dragState.startPdf.y;const obj=selectedObj(dragState);if(obj){if(dragState.type==="line"||dragState.type==="ref"){obj.pts=dragState.origData.map(p=>({...p}));if(dragState.vertex!=null)obj.pts[dragState.vertex]={x:cur.x,y:cur.y};else obj.pts=dragState.origData.map(p=>({x:p.x+dx,y:p.y+dy}));obj.x0=obj.pts[0].x;obj.y0=obj.pts[0].y;obj.x1=obj.pts[obj.pts.length-1].x;obj.y1=obj.pts[obj.pts.length-1].y;}else if(dragState.type==="parking"){obj.x=dragState.origData.x+dx;obj.y=dragState.origData.y+dy;}else{obj.pts=dragState.origData.map(p=>({...p}));if(dragState.vertex!=null)obj.pts[dragState.vertex]={x:cur.x,y:cur.y};else obj.pts=dragState.origData.map(p=>({x:p.x+dx,y:p.y+dy}));}}updatePageSummary(curPage);redraw();}else{const vh=hitVertex(cx,cy);ws.style.cursor=vh?"crosshair":hitTest(cx,cy)?"move":"default";}return;}if(mode==="pan"||!pageData){snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;guidePoint=null;return;}const{x,y}=cXY(e);const s=snap(x,y);let constrainedSnap=s;if((shiftDown||orthoMode)&&mPts.length>0&&["dist","path","ref","area"].includes(mode)){const last=mPts[mPts.length-1];const lastC=pdfToC(last.x,last.y);const cdx=s.x-lastC.x,cdy=s.y-lastC.y;if(Math.abs(cdx)>=Math.abs(cdy))constrainedSnap={x:s.x,y:lastC.y,t:s.t};else constrainedSnap={x:lastC.x,y:s.y,t:s.t};}snapTarget=constrainedSnap;guidePoint=(mPts.length&&(mode==="dist"||mode==="path"||mode==="ref"||mode==="area"||mode==="north"))?{x:constrainedSnap.x,y:constrainedSnap.y,t:constrainedSnap.t}:null;const wsR=ws.getBoundingClientRect();const scx=s.x*zoom+panX+wsR.left;const scy=s.y*zoom+panY+wsR.top;snapCur.style.left=scx+"px";snapCur.style.top=scy+"px";snapCur.style.display="block";const col=s.t?SNAP_COLORS[s.t]:"#aaa";snapCur.style.borderColor=col;snapCur.style.boxShadow=`0 0 6px ${col}66`;if(s.t){snapLbl.textContent=SNAP_LABELS[s.t];snapLbl.style.color=col;snapLbl.style.left=(scx+10)+"px";snapLbl.style.top=(scy-8)+"px";snapLbl.style.display="block";}else{snapLbl.style.display="none";}redraw();updateLoupe(e);}
+ws.addEventListener("mousemove",e=>{if(rafId)return;rafId=requestAnimationFrame(()=>{rafId=null;handleMouseMove(e);});});
+ws.addEventListener("wheel",e=>{if(!bgImg)return;e.preventDefault();const r=ws.getBoundingClientRect();const factor=Math.exp(-e.deltaY*0.0015);zoomAt(factor,e.clientX-r.left,e.clientY-r.top);},{passive:false});
+ws.addEventListener("mouseup",()=>{if(dragState){saveCurrentPage();}isPan=false;dragState=null;ws.style.cursor=spaceDown?"grab":mode==="pan"?"grab":mode==="sel"?"default":"crosshair";});
+ws.addEventListener("mouseleave",()=>{isPan=false;dragState=null;snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;guidePoint=null;loupeEl.style.display="none";redraw();});
+// ══════════════════════════════════════════════════════
+// Mode
+// ══════════════════════════════════════════════════════
+function toggleToolbarMore(e){if(e)e.stopPropagation();const menu=document.getElementById("toolbar-more-menu"),btn=document.getElementById("toolbar-more-btn");const open=!menu.classList.contains("open");menu.classList.toggle("open",open);btn.classList.toggle("active",open);}
+function closeToolbarMore(){document.getElementById("toolbar-more-menu")?.classList.remove("open");document.getElementById("toolbar-more-btn")?.classList.remove("active");}
+document.getElementById("toolbar-more")?.addEventListener("click",e=>e.stopPropagation());
+document.addEventListener("click",e=>{if(!e.target.closest("#toolbar-more"))closeToolbarMore();});
+function updateAreaToolbarState(){document.getElementById("btn-area")?.classList.toggle("active",mode==="area"&&!openingMode&&curAType!=="land");document.getElementById("btn-parcel-boundary")?.classList.toggle("active",mode==="area"&&!openingMode&&curAType==="land");document.getElementById("btn-opening")?.classList.toggle("active",mode==="area"&&openingMode);}
+function activateAreaTool(type="room"){openingMode=false;setAType(type);setMode("area");setStatus(type==="land"?"ที่ดิน: คลิกหลายจุดเพื่อวาดกรอบที่ดิน":"พื้นที่: คลิกหลายจุดเพื่อวาด polygon");}
+function activateOpeningTool(){openingMode=true;setMode("area");setStatus("ช่องเปิด: คลิกหลายจุดเพื่อวาดพื้นที่หักออก");}
+function updateActiveLayerControl(){const sel=document.getElementById("active-layer-select");if(!sel)return;if(mode==="ref")sel.value="reference_geometry";else if(openingMode)sel.value="deduction";else sel.value=areaTypeLayer(curAType)==="base_area"?"base_area":"sub_area";}
+function setActiveLayer(layer){if(layer==="reference_geometry"){openingMode=false;setMode("ref");return;}if(layer==="deduction"){activateOpeningTool();return;}openingMode=false;curAType=layer==="base_area"?"gfa":"room";setMode("area");updateActiveLayerControl();}
+function setMode(m){closeToolbarMore();mode=m;mPts=[];snapTarget=null;guidePoint=null;snapCur.style.display="none";snapLbl.style.display="none";loupeEl.style.display="none";if(m!=="calib"){calibPts=[];calibPanel.style.display="none";}["pan","sel","dist","path","ref","north","parking","area","calib"].forEach(k=>{document.getElementById("btn-"+k)?.classList.toggle("active",m===k);});updateAreaToolbarState();document.getElementById("lbl-mode").textContent={pan:"Pan ✋",sel:"↖ เลือก",dist:"วัดระยะ 📏",path:"ระยะต่อเนื่อง 〽",ref:"เส้นอ้างอิง ⌁",north:"ตั้งทิศเหนือ 🧭",parking:"ที่จอด 🚗",area:"วัดพื้นที่ ⬡",calib:"📐 สอบเทียบ"}[m]||m;ws.className=(m==="pan"||m==="sel")?"":"drawing";ws.style.cursor=m==="sel"?"default":m==="pan"?"grab":"crosshair";if(m!=="sel"){selItem=null;dragState=null;}document.getElementById("measure-result").textContent="";if(m==="calib")setStatus("คลิกจุดที่ 1…");else if(m==="path")setStatus("คลิกหลายจุด แล้วกด Enter เพื่อจบ");else if(m==="ref")setStatus("เลือกชนิดเส้นอ้างอิง คลิกหลายจุด แล้วกด Enter เพื่อจบ");else if(m==="north")setStatus("ตั้งทิศเหนือ: คลิกฐานลูกศร แล้วคลิกปลายลูกศร N");else if(m==="parking")setStatus("คลิกตำแหน่งช่องจอด 1 ครั้ง = 1 คัน");updateActiveLayerControl();updateWorkspaceState();redraw();buildRightPanel();}
+function clearMeasures(){mPts=[];mLines=[];mPolys=[];mOpenings=[];mRefs=[];mParking=[];calibPts=[];calibPanel.style.display="none";selItem=null;dragState=null;document.getElementById("measure-result").textContent="";updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();}
+function togglePerp(){perpMode=!perpMode;document.getElementById("btn-perp").classList.toggle("active",perpMode);setStatus(perpMode?"⊥ ตั้งฉาก: เปิด":"⊥ ตั้งฉาก: ปิด");}
+function toggleOpening(){if(openingMode&&mode==="area"){openingMode=false;setMode("area");setStatus("🕳 ช่องว่าง: ปิด");return;}activateOpeningTool();}
+function toggleRefDistance(){showRefDistances=!showRefDistances;document.getElementById("btn-refdist").classList.toggle("active",showRefDistances);setStatus(showRefDistances?"↔ แสดงระยะจาก object ที่เลือกถึงเส้นอ้างอิง":"↔ ปิดระยะถึงเส้นอ้างอิง");redraw();}
+function toggleSetbackDistance(){showSetbackDistances=!showSetbackDistances;document.getElementById("btn-setbackdist").classList.toggle("active",showSetbackDistances);setStatus(showSetbackDistances?"แสดงระยะช่วยวัดระหว่างแนวอาคารกับที่ดิน":"ซ่อนระยะช่วยวัดระหว่างแนวอาคารกับที่ดิน");redraw();}
+// ══════════════════════════════════════════════════════
+// Hit test
+// ══════════════════════════════════════════════════════
+function distToSeg(px,py,x0,y0,x1,y1){const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;if(len2<0.01)return Math.hypot(px-x0,py-y0);const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));return Math.hypot(px-x0-t*dx,py-y0-t*dy);}
+function ptInPoly(px,py,pts){let inside=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi))inside=!inside;}return inside;}
+function hitTest(cx,cy){const THR=12/zoom;for(let i=mParking.length-1;i>=0;i--){const p=mParking[i],c=pdfToC(p.x,p.y);if(Math.hypot(cx-c.x,cy-c.y)<THR)return{type:"parking",idx:i};}if(layerVis.reference_geometry&&!layerLock.reference_geometry)for(let i=mRefs.length-1;i>=0;i--){for(const seg of lineSegments(mRefs[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR)return{type:"ref",idx:i};}}for(let i=mOpenings.length-1;i>=0;i--){const op=mOpenings[i];if(!op.closed||layerLock.deduction)continue;const cp=op.pts.map(p=>pdfToC(p.x,p.y));if(ptInPoly(cx,cy,cp))return{type:"opening",idx:i};for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR)return{type:"opening",idx:i};}}const polyHits=[];for(let i=mPolys.length-1;i>=0;i--){const poly=mPolys[i];if(!poly.closed)continue;const _pl=areaTypeLayer(poly.areaType);if(layerLock[_pl])continue;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)polyHits.push({type:"poly",idx:i,_a:polyCanvasAreaPx(cp)});}if(polyHits.length){polyHits.sort((a,b)=>a._a-b._a);return{type:"poly",idx:polyHits[0].idx};}for(let i=mLines.length-1;i>=0;i--){for(const seg of lineSegments(mLines[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR)return{type:"line",idx:i};}}return null;}
+function hitTestAll(cx,cy){const THR=12/zoom;const hits=[];const seen=new Set();const addHit=(h)=>{const k=h.type+":"+h.idx;if(!seen.has(k)){seen.add(k);hits.push(h);}};for(let i=mParking.length-1;i>=0;i--){const p=mParking[i],c=pdfToC(p.x,p.y);if(Math.hypot(cx-c.x,cy-c.y)<THR)addHit({type:"parking",idx:i});}if(layerVis.reference_geometry&&!layerLock.reference_geometry)for(let i=mRefs.length-1;i>=0;i--){for(const seg of lineSegments(mRefs[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"ref",idx:i});break;}}}for(let i=mOpenings.length-1;i>=0;i--){const op=mOpenings[i];if(!op.closed||layerLock.deduction)continue;const cp=op.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)addHit({type:"opening",idx:i});}const polyHits=[];for(let i=mPolys.length-1;i>=0;i--){const poly=mPolys[i];if(!poly.closed)continue;const _pl2=areaTypeLayer(poly.areaType);if(layerLock[_pl2])continue;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)polyHits.push({type:"poly",idx:i,_area:polyCanvasAreaPx(cp)});}polyHits.sort((a,b)=>a._area-b._area);polyHits.forEach(h=>addHit(h));for(let i=mLines.length-1;i>=0;i--){for(const seg of lineSegments(mLines[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"line",idx:i});break;}}}return hits;}
+function showObjPicker(hits,ex,ey){const picker=document.getElementById("obj-picker");const rows=document.getElementById("obj-picker-rows");rows.innerHTML="";hits.forEach(hit=>{const obj=selectedObj(hit);if(!obj)return;let icon="⬡",name="",area="",typeLabel="";if(hit.type==="opening"){icon="🕳";name=obj.name||"ช่องว่าง";const a=polyAreaM2(obj.pts);area=a!=null?"−"+a.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="poly"){icon=areaTypeLayer(obj.areaType)==="base_area"?"🏗":"📐";name=obj.name||(AREA_TYPE_LABELS[obj.areaType]||"พื้นที่");typeLabel=AREA_TYPE_LABELS[obj.areaType]||"";const m=polyMetrics(obj,curPage);area=m.area!=null?m.area.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="ref"){icon="⌁";name=obj.name||(REF_LABELS&&REF_LABELS[obj.refType])||"เส้นอ้างอิง";}else if(hit.type==="parking"){icon="🚗";name=(PARKING_LABELS&&PARKING_LABELS[obj.parkingType])||"ที่จอด";}else if(hit.type==="line"){icon="📏";name="ระยะ";}const div=document.createElement("div");div.className="opkr-row";div.innerHTML=`<span class="opkr-icon">${icon}</span><span class="opkr-name">${name||"—"}</span><span class="opkr-area">${area}</span>`;div.addEventListener("click",()=>{selItem={type:hit.type,idx:hit.idx};syncColorBar(selItem);hideObjPicker();redraw();buildRightPanel();setStatus(`เลือก ${icon} ${name||hit.type} idx ${hit.idx}`);});rows.appendChild(div);});const pw=240;let lx=ex+10,ly=ey+10;if(lx+pw>window.innerWidth-10)lx=ex-pw-10;if(ly+hits.length*36+44>window.innerHeight-10)ly=ey-hits.length*36-50;picker.style.left=lx+"px";picker.style.top=ly+"px";picker.style.display="block";ignoreNextObjPickerDocumentClick=true;}
+function hideObjPicker(){document.getElementById("obj-picker").style.display="none";}
+function toggleLayer(lyr){layerVis[lyr]=!layerVis[lyr];redraw();buildRightPanel();}
+function toggleLayerLock(lyr){layerLock[lyr]=!layerLock[lyr];if(selItem){const obj=selectedObj(selItem);if(obj){const lt=selItem.type==="poly"?areaTypeLayer(obj.areaType):selItem.type==="opening"?"deduction":selItem.type==="ref"?"reference_geometry":null;if(lt&&layerLock[lt]){selItem=null;dragState=null;}}}redraw();buildRightPanel();}
+function toggleOrtho(){orthoMode=!orthoMode;document.getElementById("btn-ortho").classList.toggle("active",orthoMode);setStatus(orthoMode?"⊖ ตั้งฉากเสมอ: เปิด — วาดล็อก 0°/90° ตลอด":"⊖ ตั้งฉากเสมอ: ปิด");}
+function finishCurrentArea(){if(mPts.length<3){setStatus("polygon ต้องมีอย่างน้อย 3 จุด");return;}if(polySelfIntersects(mPts)){setStatus("polygon ตัดกันเอง");return;}const area=polyAreaM2(mPts);pushUndo();if(openingMode){const op={pts:[...mPts],closed:true,name:"",id:newObjectId("opening"),color:curColor,opacity:curOpacity,semanticTag:"deduction_opening",useCategory:null};linkOpeningParent(op,mPolys);mOpenings.push(op);if(area!=null)document.getElementById("measure-result").textContent=`⬡ ช่องว่าง ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อช่องว่าง",(nm)=>{op.name=nm;linkOpeningParent(op,mPolys);updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",false);}else{const at=curAType||"room";const poly={pts:[...mPts],closed:true,name:"",areaType:at,id:newObjectId("area"),color:curColor,opacity:curOpacity,semanticTag:defaultSemanticTag("poly",{areaType:at}),useCategory:null};const polyIdx=mPolys.length;mPolys.push(poly);linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(area!=null)document.getElementById("measure-result").textContent=`⬡ ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อพื้นที่",(nm,type)=>{poly.name=nm;const oldTag=poly.semanticTag;poly.areaType=type||poly.areaType||"room";const nextTag=defaultSemanticTag("poly",poly);if(oldTag===defaultSemanticTag("poly",{areaType:at}))poly.semanticTag=nextTag;normalizeSemanticFields(poly,"poly");linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(poly.areaType==="land"){ensureLandEdgeTags(poly);setTimeout(()=>openLandEdgePanel(polyIdx),0);}updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",true,at);}updatePageSummary(curPage);updateWorkspaceState();buildRightPanel();}
+function updateDrawBar(){const bar=document.getElementById("draw-bar");const inDraw=["dist","path","ref","area"].includes(mode);bar.style.display=(inDraw&&mPts.length>0)?"flex":"none";if(inDraw&&mPts.length>0){const canFinish=(mode==="path"&&mPts.length>=2)||(mode==="ref"&&mPts.length>=2)||(mode==="area"&&mPts.length>=3);document.getElementById("dbar-finish").disabled=!canFinish;document.getElementById("dbar-pts").textContent=mPts.length+" จุด";}}
+function drawBarFinish(){if(mode==="path"||mode==="ref")finishPathLike(mode==="ref"?"ref":"path");else if(mode==="area"&&mPts.length>=3)finishCurrentArea();updateDrawBar();redraw();}
+function drawBarUndoPt(){if(mPts.length>0){mPts.pop();setStatus(mPts.length?`↩ ลบจุดที่ ${mPts.length+1} — เหลือ ${mPts.length} จุด`:"ยกเลิกจุดทั้งหมด");updateDrawBar();redraw();}}
+function drawBarCancel(){mPts=[];setStatus("ยกเลิก");updateDrawBar();redraw();}
+document.addEventListener("click",e=>{const picker=document.getElementById("obj-picker");if(ignoreNextObjPickerDocumentClick){ignoreNextObjPickerDocumentClick=false;return;}if(!picker.contains(e.target))hideObjPicker();});
+// ══════════════════════════════════════════════════════
+// Undo
+// ══════════════════════════════════════════════════════
+function snapshotState(){return{lines:JSON.parse(JSON.stringify(mLines)),polys:JSON.parse(JSON.stringify(mPolys)),openings:JSON.parse(JSON.stringify(mOpenings)),refs:JSON.parse(JSON.stringify(mRefs)),parking:JSON.parse(JSON.stringify(mParking)),siteOrientation:JSON.parse(JSON.stringify(siteOrientation))};}
+function restoreSnapshot(s){mLines=s.lines||[];mPolys=s.polys||[];mOpenings=s.openings||[];mRefs=s.refs||[];mParking=s.parking||[];if(s.siteOrientation)siteOrientation=s.siteOrientation;saveCurrentPage();updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();}
+function pushUndo(){undoStack.push(snapshotState());redoStack=[];if(undoStack.length>60)undoStack.shift();}
+function undo(){if(!undoStack.length){setStatus("ไม่มีอะไรให้ Undo");return;}redoStack.push(snapshotState());const s=undoStack.pop();restoreSnapshot(s);setStatus("↩ Undo");}
+function redo(){if(!redoStack.length){setStatus("ไม่มีอะไรให้ Redo");return;}undoStack.push(snapshotState());const s=redoStack.pop();restoreSnapshot(s);setStatus("↪ Redo");}
+function deleteSelectedObject(){if(!selItem){setStatus("เลือก object ก่อนลบ");return;}pushUndo();if(selItem.type==="line")mLines.splice(selItem.idx,1);else if(selItem.type==="poly")mPolys.splice(selItem.idx,1);else if(selItem.type==="opening")mOpenings.splice(selItem.idx,1);else if(selItem.type==="ref")mRefs.splice(selItem.idx,1);else if(selItem.type==="parking")mParking.splice(selItem.idx,1);selItem=null;dragState=null;updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();setStatus("ลบ object แล้ว");}
+// ══════════════════════════════════════════════════════
+// Color/Opacity
+// ══════════════════════════════════════════════════════
+function applyColor(c){curColor=c;if(selItem){const obj=selectedObj(selItem);if(obj)obj.color=c;redraw();buildRightPanel();}}
+function applyOpacity(v){curOpacity=v/100;document.getElementById("opacity-val").textContent=v+"%";if(selItem){const obj=selectedObj(selItem);if(obj)obj.opacity=curOpacity;redraw();buildRightPanel();}}
+function syncColorBar(item){const obj=selectedObj(item);if(obj){const c=obj.color||curColor,o=Math.round((obj.opacity??curOpacity)*100);document.getElementById("inp-color").value=c.length===7?c:"#30d158";document.getElementById("inp-opacity").value=o;document.getElementById("opacity-val").textContent=o+"%";}}
+function setAType(t){curAType=t;document.querySelectorAll(".atype-btn").forEach(b=>b.classList.remove("sel"));document.getElementById("atype-"+t)?.classList.add("sel");}
+// ══════════════════════════════════════════════════════
+// Export
+// ══════════════════════════════════════════════════════
+const COL_PAGE="\u0e2b\u0e19\u0e49\u0e32";
+const COL_TYPE="\u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17";
+const COL_NAME="\u0e0a\u0e37\u0e48\u0e2d";
+const COL_VALUE="\u0e04\u0e48\u0e32";
+const COL_UNIT="\u0e2b\u0e19\u0e48\u0e27\u0e22";
+const COL_RNW="\u0e44\u0e23\u0e48-\u0e07\u0e32\u0e19-\u0e27\u0e32";
+const TYPE_DISTANCE="\u0e23\u0e30\u0e22\u0e30";
+const TYPE_PATH="\u0e23\u0e30\u0e22\u0e30\u0e15\u0e48\u0e2d\u0e40\u0e19\u0e37\u0e48\u0e2d\u0e07";
+const TYPE_REF="\u0e40\u0e2a\u0e49\u0e19\u0e2d\u0e49\u0e32\u0e07\u0e2d\u0e34\u0e07";
+const TYPE_PARKING="\u0e17\u0e35\u0e48\u0e08\u0e2d\u0e14\u0e23\u0e16";
+const TYPE_AREA="\u0e1e\u0e37\u0e49\u0e19\u0e17\u0e35\u0e48";
+const TYPE_OPENING="\u0e0a\u0e48\u0e2d\u0e07\u0e27\u0e48\u0e32\u0e07";
+const TYPE_REF_DISTANCE="\u0e23\u0e30\u0e22\u0e30\u0e16\u0e36\u0e07\u0e40\u0e2a\u0e49\u0e19\u0e2d\u0e49\u0e32\u0e07\u0e2d\u0e34\u0e07";
+function rowBase(pg,type,name,value,unit,scale){return{[COL_PAGE]:pg,[COL_TYPE]:type,[COL_NAME]:name||"",[COL_VALUE]:value,[COL_UNIT]:unit,[COL_RNW]:"",scale:scaleLabel(scale),scale_source:scale?.source||"-",scale_verified:!!scale?.verified};}
+function buildRows(){
+  normalizeAllObjects();
+  const rows=[];
+  for(const[pgStr,data]of Object.entries(pageStore)){
+    const pg=+pgStr;
+    const scale=getScaleForPage(pg);
+    const scl=scaleLabel(scale);
+    for(const l of(data.lines||[])){
+      const metrics=lineMetrics(l,pg);
+      rows.push({...rowBase(pg,l.kind==="path"?TYPE_PATH:TYPE_DISTANCE,l.name||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:l.id,segments:metrics.segments.length,semanticTag:l.semanticTag||defaultSemanticTag("line",l),useCategory:null});
+    }
+    for(const r of(data.refs||[])){
+      const metrics=lineMetrics(r,pg);
+      rows.push({...rowBase(pg,TYPE_REF,r.name||REF_LABELS[r.refType]||"",metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),metrics.dist!=null?"ม.":"pt",scale),object_id:r.id,ref_type:r.refType||"custom",label_mode:r.label?.mode||"auto",semanticTag:r.semanticTag||defaultSemanticTag("ref",r),useCategory:null});
+    }
+    for(const p of(data.parking||[])){
+      rows.push({...rowBase(pg,TYPE_PARKING,PARKING_LABELS[p.parkingType]||p.parkingType||"รถยนต์",p.count||1,"คัน",scale),object_id:p.id,parking_type:p.parkingType||"car",semanticTag:p.semanticTag||defaultSemanticTag("parking",p),useCategory:null});
+    }
+    for(const p of(data.polys||[])){
+      if(!p.closed)continue;
+      const metrics=polyMetrics(p,pg);
+      const sem=p.semanticTag||defaultSemanticTag("poly",p);
+      const row={...rowBase(pg,TYPE_AREA,p.name||"",metrics.area!=null?+metrics.area.toFixed(4):null,"ตร.ม.",scale),object_id:p.id,area_type:p.areaType||"room",label_mode:p.label?.mode||"auto",semanticTag:sem,useCategory:isAreaSemanticTag(sem)?(p.useCategory||null):null};
+      row[COL_RNW]=p.areaType==="land"?toRNW(metrics.area):"";
+      rows.push(row);
+    }
+    for(const op of(data.openings||[])){
+      if(!op.closed)continue;
+      const area=polyMetrics({pts:op.pts,closed:true},pg).area;
+      rows.push({...rowBase(pg,TYPE_OPENING,op.name||"",area!=null?+area.toFixed(4):null,"ตร.ม.",scale),object_id:op.id,parent_id:op.parentId||"",label_mode:op.label?.mode||"auto",semanticTag:op.semanticTag||defaultSemanticTag("opening",op),useCategory:null});
+    }
+  }
+  for(const r of collectRefDistanceReport()){
+    const scale=getScaleForPage(r.pg);
+    rows.push({...rowBase(r.pg,TYPE_REF_DISTANCE,`${r.objectName} -> ${r.refName}`,+(r.dist!=null?r.dist:r.distPt).toFixed(4),r.unit,scale),ref_type:r.refType,object_type:r.objectType,point_role:r.pointRole,semanticTag:"dimension_line",useCategory:null});
+  }
+  return rows.sort((a,b)=>a[COL_PAGE]-b[COL_PAGE]);
+}
+function dlBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);}
+function exportJSON(){
+  const rows=buildRows();
+  dlBlob(new Blob([JSON.stringify(rows,null,2)],{type:"application/json"}),"measurements.json");
+}
+function exportCSV(){
+  const rows=buildRows();
+  if(!rows.length){alert("\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e21\u0e35\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25");return;}
+  const cols=[COL_PAGE,"object_id","parent_id",COL_TYPE,COL_NAME,COL_VALUE,COL_UNIT,COL_RNW,"scale","scale_source","scale_verified","area_type","ref_type","object_type","point_role","parking_type","segments","label_mode","semanticTag","useCategory"];
+  const esc=v=>{const s=String(v??"").replace(/"/g,'""');return/[,"\r\n]/.test(s)?`"${s}"`:s;};
+  const csv="\uFEFF"+[cols.join(","),...rows.map(r=>cols.map(c=>esc(r[c])).join(","))].join("\r\n");
+  dlBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),"measurements.csv");
+}async function exportXLSX(){if(!totalPages){alert("เปิด PDF ก่อน");return;}syncProjectInfoFromForm();normalizeAllObjects();const report=collectAreas(),warnings=phase1Warnings(report);const scales={};for(let pg=1;pg<=totalPages;pg++){const pgStr=String(pg);const sc=getScaleForPage(pg);scales[pgStr]=sc?{label:scaleLabel(sc),pts_per_m:sc.pts_per_m,source:sc.source||"",verified:!!sc.verified,calibrated:!!sc.calibrated,status:scaleState(sc)}:null;}const body={case_id:currentCaseId,pageStore,pageTags,pageNames,projectInfo,siteOrientation,pageScales:scales,pdfName:currentFileName,pageCount:totalPages,warnings,auditMeta:{generatedAt:new Date().toISOString(),areaCount:report.areaRows.length,openingCount:report.openingRows.length,lineCount:report.lineCount,refCount:report.refCount,parkingCount:report.parkingCount,grossArea:report.measuredArea+report.landArea,openingArea:report.totalOpenings,netArea:report.netArea,warningCount:warnings.length}};setStatus("กำลัง export XLSX…");const r=await fetch("/export-xlsx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!r.ok){const d=await r.json().catch(()=>({}));setStatus("export XLSX ล้มเหลว: "+(d.error||""));if(r.status===501)alert("ติดตั้ง xlsxwriter ก่อน: pip install xlsxwriter");return;}const blob=await r.blob();const safe=currentFileName.replace(/\.pdf$/i,"");dlBlob(blob,(safe||"export")+"_report.xlsx");setStatus("✅ export XLSX แล้ว");}
+// ══════════════════════════════════════════════════════
+// Phase 1 measurement report
+// ══════════════════════════════════════════════════════
+function collectAreas(){normalizeAllObjects();let measuredArea=0,landArea=0,totalOpenings=0,lineCount=0,refCount=0,parkingCount=0;const areaRows=[],openingRows=[],scalePages=new Set(),missingScalePages=new Set(),unnamed=[],invalid=[];for(const[pgStr,store]of Object.entries(pageStore)){const pg=parseInt(pgStr);const pgName=pageNames[pg]||`หน้า ${pg}`;const scale=getScaleForPage(pg);if(scale)scalePages.add(pg);const polys=store.polys||[],openings=store.openings||[],lines=store.lines||[],refs=store.refs||[],parking=store.parking||[];lineCount+=lines.length;refCount+=refs.length;parkingCount+=parking.reduce((s,p)=>s+(p.count||1),0);for(const poly of polys){if(!poly.closed)continue;if((poly.pts||[]).length<3){invalid.push({pg,kind:"พื้นที่",object_id:poly.id,name:poly.name||poly.id||""});continue;}if(!poly.name)unnamed.push({pg,kind:"พื้นที่",object_id:poly.id});const m=polyMetrics(poly,pg);if(m.area==null){missingScalePages.add(pg);continue;}const area=m.area||0;if(poly.areaType==="land")landArea+=area;else measuredArea+=area;areaRows.push({pg,pgName,object_id:poly.id,name:poly.name||poly.id||"พื้นที่",area,areaType:poly.areaType||"room",labelMode:poly.label?.mode||"auto"});}for(const op of openings){if(!op.closed)continue;if((op.pts||[]).length<3){invalid.push({pg,kind:"ช่องว่าง",object_id:op.id,name:op.name||op.id||""});continue;}if(!op.name)unnamed.push({pg,kind:"ช่องว่าง",object_id:op.id});const area=polyMetrics({pts:op.pts,closed:true},pg).area;if(area==null){missingScalePages.add(pg);continue;}totalOpenings+=area;openingRows.push({pg,pgName,object_id:op.id,name:op.name||op.id||"ช่องว่าง",area,parentId:op.parentId||null,parentStatus:op.parentStatus||"",parentCandidateIds:op.parentCandidateIds||[],labelMode:op.label?.mode||"auto"});}}const netArea=measuredArea+landArea-totalOpenings;return{measuredArea,landArea,totalOpenings,netArea,lineCount,refCount,parkingCount,areaRows,openingRows,scalePages:[...scalePages],missingScalePages:[...missingScalePages],unnamed,invalid};}
+function phase1Warnings(report){const warns=[];const add=(severity,page_index,object_id,message,suggested_action)=>warns.push({id:`W-${String(warns.length+1).padStart(3,"0")}`,severity,page_index,object_id:object_id||"",message,suggested_action});if(!report.areaRows.length&&!report.openingRows.length&&report.lineCount===0&&report.refCount===0&&report.parkingCount===0)add("warning","",null,"ยังไม่มี object สำหรับ export","วาดพื้นที่ ระยะ เส้นอ้างอิง หรือ marker ที่จอดก่อน export");for(const pg of report.missingScalePages)add("warning",pg,null,`หน้า ${pg} มี geometry แต่ยังไม่มี scale`,"ใช้เครื่องมือสอบเทียบก่อนนำค่าม. / ตร.ม. ไปใช้งาน");for(const item of report.unnamed.slice(0,20))add("info",item.pg,item.object_id,`${item.kind} หน้า ${item.pg} ยังไม่มีชื่อ`,"ตั้งชื่อ object เพื่อให้อ่านรายงานและ export ง่ายขึ้น");for(const item of report.invalid)add("warning",item.pg,item.object_id,`${item.kind} หน้า ${item.pg} มีจุดไม่พอ`,"แก้ polygon ให้มีอย่างน้อย 3 จุด");for(const op of report.openingRows.slice(0,50)){if(op.parentStatus==="ambiguous")add("warning",op.pg,op.object_id,`ช่องว่าง ${op.name} หน้า ${op.pg} อยู่ในพื้นที่หลักหลายอัน`,"เลือก parent area ให้ชัดเจนหรือปรับ geometry ให้ไม่กำกวม");else if(!op.parentId)add("warning",op.pg,op.object_id,`ช่องว่าง ${op.name} หน้า ${op.pg} ยังไม่ได้ผูก parent`,"วาดช่องว่างให้อยู่ในพื้นที่หลักหนึ่งอัน หรือกำหนด parent area");}for(const [pgStr,tag] of Object.entries(pageTags)){const pg=parseInt(pgStr);if(tag==="site"&&!excludedPages.has(pg)&&!getPageNorth(pg))add("info",pg,null,`หน้าผังบริเวณ ${pg} ยังไม่ได้ตั้งทิศเหนือ`,"ใช้เครื่องมือตั้งทิศเหนือหากต้องรายงาน orientation");}return warns;}
+function syncProjectInfoFromForm(){projectInfo={reqNo:document.getElementById("pi-reqno").value.trim(),buildingType:document.getElementById("pi-btype").value,workType:document.getElementById("pi-worktype").value,floors:parseInt(document.getElementById("pi-floors").value)||0,gfa:parseFloat(document.getElementById("pi-gfa").value)||0,units:parseInt(document.getElementById("pi-units").value)||0};}
+function collectParkingSummary(){saveCurrentPage();const rows=[],typeRows=[],total={};for(const[pgStr,store]of Object.entries(pageStore)){const pg=parseInt(pgStr);const byType={};for(const p of(store.parking||[])){const t=p.parkingType||"car";byType[t]=(byType[t]||0)+(p.count||1);total[t]=(total[t]||0)+(p.count||1);}const count=Object.values(byType).reduce((s,v)=>s+v,0);if(count){const tag=pageTags[pg]||"",tagLabel=TAG_LABELS[tag]||tag||"ไม่ระบุ";const row={pg,name:pageNames[pg]||`หน้า ${pg}`,tag,tagLabel,byType,count};rows.push(row);for(const[t,c]of Object.entries(byType))typeRows.push({...row,parkingType:t,parkingLabel:PARKING_LABELS[t]||t,count:c});}}return{rows,typeRows,total,totalCount:Object.values(total).reduce((s,v)=>s+v,0)};}
+function openCheckPanel(){
+  if(!totalPages){alert('เปิด PDF ก่อน');return;}
+  syncProjectInfoFromForm();
+  const report=collectAreas(),warnings=phase1Warnings(report);
+  const panel=document.getElementById('check-panel'),body=document.getElementById('check-body');
+  const parkingSummary=collectParkingSummary(),refReport=collectRefDistanceReport();
+  const parkingRowsHtml=parkingSummary.typeRows.map(r=>`<tr><td>${r.name}<br><small>${r.tagLabel}</small></td><td>${r.parkingLabel}</td><td>${r.count}</td></tr>`).join('');
+  const parkingReport=parkingSummary.totalCount?`<div class="check-data"><h4>รายงานที่จอดรถตามหน้า/ชั้น</h4><table class="check-table"><tr><th>หน้า / ชั้น</th><th>ประเภท</th><th>จำนวน</th></tr>${parkingRowsHtml}<tr><td colspan="2"><b>รวมทั้งหมด</b></td><td><b>${parkingSummary.totalCount}</b></td></tr></table></div>`:'';
+  const refRowsHtml=refReport.slice(0,80).map(r=>`<tr><td>${r.pageName}<br><small>${r.refName}</small></td><td>${r.objectName}<br><small>${r.pointRole||''}</small></td><td>${r.dist!=null?r.dist.toFixed(2):r.distPt.toFixed(1)} ${r.unit}</td></tr>`).join('');
+  const refReportHtml=refReport.length?`<div class="check-data"><h4>รายงานระยะถึงเส้นอ้างอิง</h4><table class="check-table"><tr><th>หน้า / เส้นอ้างอิง</th><th>Object</th><th>ระยะใกล้สุด</th></tr>${refRowsHtml}</table>${refReport.length>80?`<div class="cd-warn">แสดง 80 รายการแรกจาก ${refReport.length} รายการ</div>`:''}</div>`:'';
+  const warnHtml=warnings.length?`<div class="check-data"><h4>QA warnings</h4><table class="check-table"><tr><th>ID</th><th>ระดับ</th><th>หน้า</th><th>Object</th><th>ข้อความ</th><th>แนวทาง</th></tr>${warnings.map(w=>`<tr class="unk"><td>${w.id}</td><td>${w.severity}</td><td>${w.page_index||''}</td><td>${w.object_id||''}</td><td>${w.message}</td><td><small>${w.suggested_action}</small></td></tr>`).join('')}</table></div>`:'<div class="check-data"><h4>QA warnings</h4><div class="cd-row"><span>สถานะ</span><span>ไม่พบ warning เบื้องต้น</span></div></div>';
+  const areaRows=report.areaRows.slice(0,80).map(r=>`<tr><td>${r.pgName}<br><small>${r.areaType}</small></td><td>${r.name}</td><td>${r.area.toFixed(2)} ตร.ม.</td></tr>`).join('');
+  const openingRows=report.openingRows.slice(0,80).map(r=>`<tr><td>${r.pgName}</td><td>${r.name}</td><td>-${r.area.toFixed(2)} ตร.ม.</td></tr>`).join('');
+  let html=`<div class="check-summary"><span class="cs-pass">พื้นที่ ${report.areaRows.length}</span><span class="cs-fail">ช่องว่าง ${report.openingRows.length}</span><span class="cs-unk">Warning ${warnings.length}</span></div>`;
+  html+=`<div class="check-data"><h4>สรุปการวัด</h4><div class="cd-row"><span>พื้นที่อาคาร/ห้อง</span><span>${report.measuredArea.toFixed(2)} ตร.ม.</span></div><div class="cd-row"><span>พื้นที่ที่ดิน</span><span>${report.landArea.toFixed(2)} ตร.ม.</span></div><div class="cd-row"><span>ช่องว่าง/หักออก</span><span>${report.totalOpenings.toFixed(2)} ตร.ม.</span></div><div class="cd-row"><span>สุทธิ</span><span>${report.netArea.toFixed(2)} ตร.ม.</span></div><div class="cd-row"><span>ระยะ / เส้นอ้างอิง / ที่จอด</span><span>${report.lineCount} / ${report.refCount} / ${report.parkingCount}</span></div><div class="cd-row"><span>หน้าที่มี scale</span><span>${report.scalePages.length||0}</span></div></div>`;
+  if(areaRows)html+=`<div class="check-data"><h4>พื้นที่ที่วัดได้</h4><table class="check-table"><tr><th>หน้า</th><th>ชื่อ</th><th>พื้นที่</th></tr>${areaRows}</table>${report.areaRows.length>80?`<div class="cd-warn">แสดง 80 รายการแรกจาก ${report.areaRows.length} รายการ</div>`:''}</div>`;
+  if(openingRows)html+=`<div class="check-data"><h4>ช่องว่าง / หักออก</h4><table class="check-table"><tr><th>หน้า</th><th>ชื่อ</th><th>พื้นที่</th></tr>${openingRows}</table>${report.openingRows.length>80?`<div class="cd-warn">แสดง 80 รายการแรกจาก ${report.openingRows.length} รายการ</div>`:''}</div>`;
+  html+=warnHtml;
+  html+=parkingReport+refReportHtml;
+  body.innerHTML=html;panel.classList.add('open');
+}
+function closeCheckPanel(){document.getElementById('check-panel').classList.remove('open');}
+// ══════════════════════════════════════════════════════
+// Keyboard
+// ══════════════════════════════════════════════════════
+document.addEventListener("keydown",e=>{if(e.key==="Shift"&&e.target.tagName!=="INPUT"){shiftDown=true;redraw();return;}if(e.key===" "&&!spaceDown&&e.target.tagName!=="INPUT"){e.preventDefault();spaceDown=true;preSpaceMode=mode;ws.style.cursor="grab";return;}if(e.target.tagName==="INPUT")return;if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();if(mPts.length>0){mPts.pop();setStatus(mPts.length?`↩ ลบจุดที่ ${mPts.length+1} — เหลือ ${mPts.length} จุด`:"ยกเลิกจุดทั้งหมด");redraw();}else{undo();}return;}if(e.key==="Enter"&&(mode==="path"||mode==="ref")&&mPts.length){e.preventDefault();finishPathLike(mode==="ref"?"ref":"path");return;}if(e.key==="ArrowRight"){const n=getNextPage(curPage);if(n)loadPage(n);}if(e.key==="ArrowLeft"){const p=getPrevPage(curPage);if(p)loadPage(p);}if(e.key==="Escape"){if(landEdgeState.open){closeLandEdgePanel();return;}if((mode==="path"||mode==="ref"||mode==="area"||mode==="north")&&mPts.length){mPts=[];redraw();setStatus("ยกเลิกเส้นที่กำลังวาด");return;}setMode("pan");namePanel.style.display="none";ctxMenu.style.display="none";closePgMgr();}if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){pushUndo();if(selItem.type==="line")mLines.splice(selItem.idx,1);else if(selItem.type==="poly")mPolys.splice(selItem.idx,1);else if(selItem.type==="opening")mOpenings.splice(selItem.idx,1);else if(selItem.type==="ref")mRefs.splice(selItem.idx,1);else if(selItem.type==="parking")mParking.splice(selItem.idx,1);selItem=null;dragState=null;updatePageSummary(curPage);redraw();}if(e.key==="f"||e.key==="F")fitToWindow();if(e.key==="Delete"&&ctxTarget)ctxDelete();if(e.key==="b"&&(e.ctrlKey||e.metaKey)){e.preventDefault();toggleSidebar();}});
+document.addEventListener("keyup",e=>{if(e.key===" "&&spaceDown){spaceDown=false;ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";}if(e.key==="Shift"){shiftDown=false;redraw();}});
+function setStatus(t){document.getElementById("status").textContent=t;}
+window.addEventListener("resize",()=>{if(bgImg)fitToWindow();});
+// ══════════════════════════════════════════════════════
+// Page manager
+// ══════════════════════════════════════════════════════
+function openPageManager(){if(!totalPages){alert("เปิด PDF ก่อน");return;}const overlay=document.getElementById("pgmgr-overlay");const grid=document.getElementById("pgmgr-grid");grid.innerHTML="";if(!pgmgrSel.size){for(let i=1;i<=totalPages;i++)if(!excludedPages.has(i))pgmgrSel.add(i);}for(let i=1;i<=totalPages;i++){if(excludedPages.has(i))continue;const cell=document.createElement("div");cell.className="pgmgr-cell"+(pgmgrSel.has(i)?" sel":"");cell.dataset.page=i;cell.innerHTML=`<img src="${thumbUrl(i)}" loading="lazy"><span>หน้า ${i}</span>`;cell.addEventListener("click",e=>pgmgrClickCell(i,e));grid.appendChild(cell);}pgmgrUpdateInfo();overlay.classList.add("open");}
+function closePgMgr(){document.getElementById("pgmgr-overlay").classList.remove("open");}
+function pgmgrClickCell(i,e){if(e.shiftKey&&pgmgrLastClick!=null){const lo=Math.min(pgmgrLastClick,i),hi=Math.max(pgmgrLastClick,i);const range=[];for(let p=lo;p<=hi;p++)if(!excludedPages.has(p))range.push(p);const allSel=range.every(p=>pgmgrSel.has(p));for(const p of range)allSel?pgmgrSel.delete(p):pgmgrSel.add(p);}else{if(!excludedPages.has(i))pgmgrSel.has(i)?pgmgrSel.delete(i):pgmgrSel.add(i);}pgmgrLastClick=i;document.querySelectorAll(".pgmgr-cell").forEach(c=>{c.classList.toggle("sel",pgmgrSel.has(+c.dataset.page));});pgmgrUpdateInfo();}
+function pgmgrSelectAll(){pgmgrSel.clear();for(let i=1;i<=totalPages;i++)if(!excludedPages.has(i))pgmgrSel.add(i);document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.add("sel"));pgmgrUpdateInfo();}
+function pgmgrClearAll(){pgmgrSel.clear();document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.remove("sel"));pgmgrUpdateInfo();}
+function pgmgrUpdateInfo(){const validTotal=totalPages-excludedPages.size;document.getElementById("pgmgr-sel-info").textContent=`เลือก ${pgmgrSel.size} / ${validTotal} หน้า`;}
+async function pgmgrExportPDF(withAnnotations){if(!pgmgrSel.size){alert("เลือกหน้าก่อน");return;}const pages=[...pgmgrSel].sort((a,b)=>a-b);saveCurrentPage();const body={case_id:currentCaseId,pages,pdfName:currentFileName,rotations:pageRotations};if(withAnnotations)body.annotations=pageStore;setStatus("กำลัง export…");const r=await fetch("/export-pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!r.ok){setStatus("export ล้มเหลว");return;}const blob=await r.blob();const safe=currentFileName.replace(/\.pdf$/i,"");dlBlob(blob,(safe||"export")+`_p${pages.join("-")}.pdf`);setStatus(`✅ export ${pages.length} หน้า`);}
+// ══════════════════════════════════════════════════════
+// Save/Load project
+// ══════════════════════════════════════════════════════
+function saveProject(){if(!totalPages){alert("เปิด PDF ก่อน");return;}syncProjectInfoFromForm();normalizeAllObjects();const proj={version:1,pdfName:currentFileName,totalPages,pageStore,pageRotations,pageTags,pageNames,projectInfo,siteOrientation,excludedPages:[...excludedPages]};const safe=currentFileName.replace(/\.pdf$/i,"")||"project";dlBlob(new Blob([JSON.stringify(proj,null,2)],{type:"application/json"}),safe+".bmaplan");touchSetupStatus("บันทึกไฟล์โปรเจกต์แล้ว");const saveState=document.getElementById("lbl-save-state");if(saveState)saveState.textContent="Saved manually";setStatus("💾 บันทึกแล้ว");}
+function applyLoadedProject(proj){pageStore=proj.pageStore||{};for(const store of Object.values(pageStore))ensureStoreObjectIds(store);pageRotations=proj.pageRotations||{};pageTags=proj.pageTags||{};pageNames=proj.pageNames||{};projectInfo=proj.projectInfo||{};siteOrientation=proj.siteOrientation||{};excludedPages=new Set(proj.excludedPages||[]);restorePage(curPage);buildSidebar();if(document.getElementById("setup-overlay")?.classList.contains("open"))openSetup();else buildTagGrid();redraw();buildRightPanel();}
+document.getElementById("proj-input").addEventListener("change",async e=>{const file=e.target.files[0];if(!file)return;e.target.value="";try{const text=await file.text();const proj=JSON.parse(text);if(proj.version!==1)throw new Error("version ไม่รองรับ");if(proj.pdfName&&currentFileName&&proj.pdfName!==currentFileName)throw new Error("ไฟล์โปรเจกต์ไม่ตรงกับ PDF ปัจจุบัน");if(proj.totalPages&&totalPages&&proj.totalPages!==totalPages)throw new Error("จำนวนหน้าไม่ตรงกับ PDF ปัจจุบัน");applyLoadedProject(proj);setStatus("📂 โหลด "+file.name+" แล้ว");}catch(err){alert("โหลดไม่ได้: "+err.message);}});
+document.getElementById("proj-input2")?.addEventListener("change",async e=>{const file=e.target.files[0];if(!file)return;e.target.value="";try{const text=await file.text();const proj=JSON.parse(text);applyLoadedProject(proj);setStatus("📂 โหลด "+file.name+" แล้ว");}catch(err){alert("โหลดไม่ได้: "+err.message);}});
+// ══════════════════════════════════════════════════════
+// Setup
+// ══════════════════════════════════════════════════════
+function openSetup(){document.getElementById("setup-pdf-name").textContent=currentFileName||"";document.getElementById("pi-reqno").value=projectInfo.reqNo||"";document.getElementById("pi-btype").value=projectInfo.buildingType||"";document.getElementById("pi-worktype").value=projectInfo.workType||"new";document.getElementById("pi-floors").value=projectInfo.floors||"";document.getElementById("pi-gfa").value=projectInfo.gfa||"";document.getElementById("pi-units").value=projectInfo.units||"";document.getElementById("setup-page-search").value=setupSearch;buildTagGrid();document.getElementById("setup-overlay").classList.add("open");touchSetupStatus("พร้อมตั้งค่า");}
+function setupPageMatches(n){const tag=pageTags[n]||"",name=(pageNames[n]||`หน้า ${n}`).toLowerCase(),label=(TAG_LABELS[tag]||"").toLowerCase(),q=setupSearch.trim().toLowerCase();if(q&&!(name.includes(q)||String(n).includes(q)||label.includes(q)))return false;if(setupFilter==="categorized")return!!tag;if(setupFilter==="uncategorized")return!tag;if(setupFilter==="visible")return!excludedPages.has(n);if(setupFilter==="hidden")return excludedPages.has(n);if(TAG_LABELS[setupFilter])return tag===setupFilter;return true;}
+function updateSetupSummary(){const wrap=document.getElementById("setup-summary-chips");if(!wrap)return;let categorized=0,uncategorized=0;const counts={site:0,plan:0,elev:0,section:0,detail:0,schedule:0,other:0};for(let i=1;i<=totalPages;i++){const tag=pageTags[i]||"";if(tag){categorized++;if(counts[tag]!=null)counts[tag]++;}else uncategorized++;}const chips=[["all","ทั้งหมด",totalPages],["categorized","จัดหมวดหมู่แล้ว",categorized],["uncategorized","ยังไม่จัดหมวดหมู่",uncategorized],["site","ผังบริเวณ",counts.site],["plan","ชั้น",counts.plan],["elev","รูปด้าน",counts.elev],["section","รูปตัด",counts.section],["detail","รายละเอียด",counts.detail],["schedule","ตาราง",counts.schedule]];wrap.innerHTML=chips.map(([key,label,count])=>`<button class="setup-chip ${setupFilter===key?"active":""} ${count?"":"muted"}" onclick="setSetupFilter('${key}')"><span>${label}</span><b>${count}</b></button>`).join("");}
+function buildTagGrid(){const grid=document.getElementById("tag-grid");if(!grid)return;document.getElementById("setup-page-search").value=setupSearch;document.getElementById("setup-filter-btn").textContent=`ตัวกรอง: ${SETUP_FILTER_LABELS[setupFilter]||"ทั้งหมด"}`;updateSetupSummary();grid.innerHTML="";let shown=0;for(let i=1;i<=totalPages;i++){if(!setupPageMatches(i))continue;shown++;const cell=document.createElement("div");const excl=excludedPages.has(i),tag=pageTags[i]||"",dotCls=TAG_OPTIONS.find(o=>o.value===tag)?.cls||"";cell.className="tag-cell"+(excl?" excluded":"")+(setupSelectedPage===i?" selected":"");cell.id="tc-"+i;cell.dataset.page=i;const optHtml=TAG_OPTIONS.map(o=>`<option value="${o.value}"${tag===o.value?" selected":""}>${escHtml(o.label)}</option>`).join("");const pgName=pageNames[i]||"";cell.innerHTML=`<button class="tc-del-btn${excl?" on":""}" title="${excl?"คืนหน้า":"ซ่อนหน้านี้"}" onclick="event.stopPropagation();toggleExcludePage(${i})">×</button><img src="/thumb-md/${i}?${caseQuery()}&rot=${getRot(i)}&v=${docVersion}" loading="lazy" onclick="selectSetupPage(${i})"><span class="tc-lbl">หน้า ${i}</span><input id="tc-name-${i}" type="text" placeholder="ชื่อหน้า" value="${escHtml(pgName)}" onfocus="selectSetupPage(${i})" onchange="setPageName(${i},this.value)"${excl?" disabled":""}><div class="tc-cat"><span class="tc-dot ${dotCls}"></span><select id="tc-tag-${i}" onfocus="selectSetupPage(${i})" onchange="setPageTag(${i},this.value)"${excl?" disabled":""}>${optHtml}</select></div>`;grid.appendChild(cell);}if(!shown)grid.innerHTML=`<div class="setup-empty">ไม่พบหน้าที่ตรงกับตัวกรอง</div>`;}
+function selectSetupPage(n){setupSelectedPage=n;document.querySelectorAll(".tag-cell").forEach(c=>c.classList.toggle("selected",+c.dataset.page===n));}
+function setSetupFilter(filter){setupFilter=filter;buildTagGrid();}
+function toggleSetupFilter(){const order=["all","categorized","uncategorized","visible","hidden"];const idx=order.indexOf(setupFilter);setupFilter=order[(idx+1+order.length)%order.length];buildTagGrid();}
+function touchSetupStatus(msg="อัปเดตข้อมูลในฟอร์มแล้ว"){const el=document.getElementById("setup-save-status");if(!el)return;const t=new Date().toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"});el.textContent=`${msg} ${t}`;}
+function setPageName(n,val){pageNames[n]=val.trim();buildSidebar();updateBottomBar();touchSetupStatus();}
+function setPageTag(n,val){pageTags[n]=val;if(val&&!pageNames[n])autoNamePage(n,val);buildSidebar();buildTagGrid();touchSetupStatus();}
+function toggleExcludePage(n){if(excludedPages.has(n))excludedPages.delete(n);else excludedPages.add(n);buildSidebar();buildTagGrid();touchSetupStatus(excludedPages.has(n)?"ซ่อนหน้านี้แล้ว":"คืนหน้านี้แล้ว");}
+async function startCheck(){if(excludedPages.size>=totalPages){alert("ต้องมีอย่างน้อย 1 หน้าเพื่อเริ่มวัด");return;}syncProjectInfoFromForm();await fetch("/project",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({case_id:currentCaseId,page_tags:pageTags,project_info:projectInfo})});buildSidebar();document.getElementById("setup-overlay").classList.remove("open");const sitePage=Object.entries(pageTags).find(([k,v])=>v==="site"&&!excludedPages.has(parseInt(k)));let target=sitePage?parseInt(sitePage[0]):1;if(excludedPages.has(target))target=getNextPage(0)||target;await loadPage(target);setStatus("พร้อมวัดพื้นที่จาก PDF");}
+// ══════════════════════════════════════════════════════
+// Export panel
+// ══════════════════════════════════════════════════════
+function openExportPanel(){document.getElementById("export-panel").classList.add("open");}
+function closeExportPanel(){document.getElementById("export-panel").classList.remove("open");}
+// ══════════════════════════════════════════════════════
+// Page summary
+// ══════════════════════════════════════════════════════
+function updatePageSummary(pg=curPage){const el=document.getElementById("page-summary");if(!el)return;const store=getStore(pg);const polys=pg===curPage?mPolys:(store.polys||[]);const openings=pg===curPage?mOpenings:(store.openings||[]);const parking=pg===curPage?mParking:(store.parking||[]);const refs=pg===curPage?mRefs:(store.refs||[]);const closed=polys.filter(p=>p.closed);const closedOp=openings.filter(o=>o.closed);if(!closed.length&&!closedOp.length&&!parking.length&&!refs.length){el.textContent="ยังไม่มีรายการพื้นที่";return;}let roomArea=0,landArea=0,opArea=0;for(const poly of closed){const area=polyMetrics(poly,pg).area;if(area==null)continue;if(poly.areaType==="land")landArea+=area;else roomArea+=area;}for(const op of closedOp){const area=polyAreaM2(op.pts);if(area!=null)opArea+=area;}const net=roomArea+landArea-opArea;const parts=[];if(roomArea>0)parts.push(`อาคาร/ห้อง ${roomArea.toFixed(2)}`);if(landArea>0)parts.push(`ที่ดิน ${landArea.toFixed(2)}`);if(opArea>0)parts.push(`(-)ช่องว่าง ${opArea.toFixed(2)}`);if(parking.length)parts.push(`ที่จอด ${parking.reduce((s,p)=>s+(p.count||1),0)} คัน`);if(refs.length)parts.push(`เส้นอ้างอิง ${refs.length}`);parts.push(`สุทธิ ${net.toFixed(2)} ตร.ม.`);el.textContent=parts.join(" · ");}
+function initTooltips(){const tips={"#sidebar-toggle":"เปิด/ปิดแถบหน้า","#upload-btn":"เปิดไฟล์ PDF","#top-open-project":"เปิดไฟล์โปรเจกต์ .bmaplan","#btn-sample-pdf":"เปิด PDF ตัวอย่างสำหรับทดสอบ workflow","#btn-export-report":"เปิดเมนูส่งออกรายงาน","#btn-report":"เปิดสรุปการวัดและ warnings","#btn-setup":"ตั้งค่าโปรเจกต์และ tag หน้า","#btn-prev":"ไปหน้าก่อนหน้า","#btn-next":"ไปหน้าถัดไป","#sn-ep":"Snap endpoint ปลายเส้น","#sn-mp":"Snap midpoint กึ่งกลางเส้น","#sn-ct":"Snap center จุดกึ่งกลาง","#sn-nl":"Snap nearest line จุดใกล้เส้นที่สุด","#sn-ix":"Snap intersection จุดตัดเส้น","#sn-off":"ปิด snap","#btn-perp":"Snap ตั้งฉากกับเส้นใกล้ที่สุด","#btn-opening":"วาดช่องว่าง/พื้นที่หักออก","#btn-pan":"เลื่อนกระดาษและซูม","#btn-sel":"เลือก/ย้าย/แก้สี object","#btn-dist":"วัดระยะ 2 จุด","#btn-path":"วัดระยะต่อเนื่องหลายจุด กด Enter เพื่อจบ","#btn-ref":"วาดเส้นอ้างอิง เช่น ถนน คลอง ผนัง","#btn-north":"ตั้งทิศเหนือด้วยการคลิกฐานและปลายลูกศร N","#btn-refdist":"แสดงระยะจาก object ที่เลือกไปหาเส้นอ้างอิง","#btn-setbackdist":"แสดง/ซ่อนระยะช่วยวัดระหว่างแนวอาคารกับที่ดิน","#btn-land-edge":"กำหนดชนิดด้านของ polygon ที่ดิน","#btn-parcel-boundary":"วาดกรอบที่ดินด้วยเครื่องมือพื้นที่เดิม","#ref-type":"เลือกชนิดเส้นอ้างอิง","#btn-parking":"คลิกนับช่องจอดรถ 1 ครั้ง = 1 คัน","#parking-type":"เลือกชนิดที่จอดรถ","#btn-area":"วาดพื้นที่ polygon","#btn-calib":"สอบเทียบ scale ด้วยระยะจริง","#btn-redo":"ทำซ้ำรายการที่ Undo ล่าสุด","#btn-delete-selected":"ลบ object ที่เลือก","button[onclick='clearMeasures()']":"ล้างรายการวัดบนหน้านี้","button[onclick='undo()']":"ย้อนกลับรายการล่าสุด"};for(const[sel,text]of Object.entries(tips)){document.querySelectorAll(sel).forEach(el=>{el.title=text;el.setAttribute("aria-label",text);});}}
+initTooltips();
+buildRightPanel();
+document.getElementById("inp-color").addEventListener("mousedown",()=>{if(selItem)pushUndo();});
+document.getElementById("inp-opacity").addEventListener("mousedown",()=>{if(selItem)pushUndo();});
+</script>
+</body>
+</html>
+

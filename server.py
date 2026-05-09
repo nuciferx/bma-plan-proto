@@ -37,9 +37,10 @@ from export.xlsx_helpers import (
 
 app = FastAPI()
 
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
-if _STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+_BASE_DIR = Path(__file__).resolve().parent
+_STATIC_DIR = _BASE_DIR / "static"
+print(f"[static] serving from: {_STATIC_DIR}")
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 CASES: dict = {}
 PT_PER_MM = 72 / 25.4

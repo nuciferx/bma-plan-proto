@@ -517,7 +517,11 @@ def _test_main_measurement_ui_cleanup(page):
                     if(prev !== null) localStorage.setItem("bmaPlan.recentProjects.v1", prev);
                     else localStorage.removeItem("bmaPlan.recentProjects.v1");
                     return true;
-                })()
+                })(),
+                exportCurrentPageFnExists: typeof exportCurrentPageAnnotatedPDF === "function",
+                exportCurrentPageBtnExists: !!document.querySelector("#export-panel button[onclick='exportCurrentPageAnnotatedPDF()']"),
+                exportAllPagesFnExists: typeof exportAllPagesAnnotatedPDF === "function",
+                exportAllPagesBtnExists: !!document.querySelector("#export-panel button[onclick='exportAllPagesAnnotatedPDF()']")
             };
         }"""
     )
@@ -653,6 +657,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"recent-proj-dropdown element not found in DOM: {result}")
     if not result.get("openBrokenRecentNoCrash"):
         raise AssertionError(f"getRecentProjects() crashes on broken localStorage: {result}")
+    if not result.get("exportCurrentPageFnExists"):
+        raise AssertionError(f"exportCurrentPageAnnotatedPDF() function missing: {result}")
+    if not result.get("exportCurrentPageBtnExists"):
+        raise AssertionError(f"Export Current Page button missing from export panel: {result}")
+    if not result.get("exportAllPagesFnExists"):
+        raise AssertionError(f"exportAllPagesAnnotatedPDF() function missing: {result}")
+    if not result.get("exportAllPagesBtnExists"):
+        raise AssertionError(f"Export All Pages button missing from export panel: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":

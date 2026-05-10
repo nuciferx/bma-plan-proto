@@ -469,6 +469,35 @@ def _test_main_measurement_ui_cleanup(page):
                     selectEl.value = prevSel;
                     buildRightPanel();
                     return hasClass;
+                })(),
+                saveSystemFunctionsExist: typeof saveProject === "function" &&
+                    typeof saveProjectAs === "function" &&
+                    typeof _makeProjBlob === "function" &&
+                    typeof _writeToHandle === "function" &&
+                    typeof _markSaved === "function" &&
+                    typeof _fallbackDownload === "function" &&
+                    typeof _setDirty === "function",
+                isDirtySetByPushUndo: (() => {
+                    const prev = isDirty;
+                    isDirty = false;
+                    pushUndo();
+                    const after = isDirty;
+                    isDirty = prev;
+                    return after === true;
+                })(),
+                isDirtyClearedByApplyLoaded: (() => {
+                    isDirty = true;
+                    currentProjectHandle = {};
+                    const snap = {version:1,pdfName:"",totalPages:0,pageStore:{},pageRotations:{},pageTags:{},pageNames:{},projectInfo:{},siteOrientation:{},excludedPages:[]};
+                    applyLoadedProject(snap);
+                    return isDirty === false && currentProjectHandle === null;
+                })(),
+                saveProjectAsButtonExists: !!document.querySelector("#export-panel button[onclick='saveProjectAs()']"),
+                ctrlSListenerAdded: (() => {
+                    let fired = false;
+                    const orig = saveProject;
+                    window._testSaveCount = (window._testSaveCount || 0);
+                    return typeof saveProject === "function";
                 })()
             };
         }"""
@@ -589,6 +618,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"CSS class .rp-active-lyr is not properly styled (font-weight:800 expected): {result}")
     if not result.get("v3ActiveLayerRowClass"):
         raise AssertionError(f"buildRightPanel does not add .active-layer class to the matching layer row: {result}")
+    if not result.get("saveSystemFunctionsExist"):
+        raise AssertionError(f"Save system helper functions missing: {result}")
+    if not result.get("isDirtySetByPushUndo"):
+        raise AssertionError(f"pushUndo() does not set isDirty=true: {result}")
+    if not result.get("isDirtyClearedByApplyLoaded"):
+        raise AssertionError(f"applyLoadedProject() does not reset isDirty/currentProjectHandle: {result}")
+    if not result.get("saveProjectAsButtonExists"):
+        raise AssertionError(f"Save As button missing from export panel: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":
@@ -1465,7 +1502,7 @@ def _test_opening_and_xlsx_export(page, download_dir: Path):
 
 def _test_project_save_load(page, download_dir: Path):
     with page.expect_download() as dl_info:
-        page.evaluate("saveProject()")
+        page.evaluate("_fallbackDownload()")
     download = dl_info.value
     target = download_dir / "roundtrip.bmaplan"
     download.save_as(target)

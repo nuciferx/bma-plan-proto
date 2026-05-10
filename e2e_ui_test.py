@@ -454,6 +454,21 @@ def _test_main_measurement_ui_cleanup(page):
                     const styled = getComputedStyle(tmp).fontWeight === "800";
                     document.body.removeChild(tmp);
                     return styled;
+                })(),
+                v3ActiveLayerRowClass: (() => {
+                    const layers = getCurrentPageLayers();
+                    const selectEl = document.getElementById("active-layer-select");
+                    if (!layers.length || !selectEl) return true;
+                    const opts = [...selectEl.options].map(o => o.value);
+                    const matchSlug = layers.map(l => l.slug).find(s => opts.includes(s));
+                    if (!matchSlug) return true;
+                    const prevSel = selectEl.value;
+                    selectEl.value = matchSlug;
+                    buildRightPanel();
+                    const hasClass = !!document.querySelector("#rp-content .rp-layer-row.active-layer");
+                    selectEl.value = prevSel;
+                    buildRightPanel();
+                    return hasClass;
                 })()
             };
         }"""
@@ -572,6 +587,8 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"Right panel header #rp-header .rp-page-ctx not found after page load: {result}")
     if not result.get("activeBadgeClassStyled"):
         raise AssertionError(f"CSS class .rp-active-lyr is not properly styled (font-weight:800 expected): {result}")
+    if not result.get("v3ActiveLayerRowClass"):
+        raise AssertionError(f"buildRightPanel does not add .active-layer class to the matching layer row: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":

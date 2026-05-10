@@ -411,3 +411,53 @@ body.ui-left-v3 .workflow-card{background:#1e2429;border-color:#2a3540}
 body.ui-widgets-v3 .widget-card{border-radius:10px;border-color:#3a404a;backdrop-filter:blur(12px)}
 body.ui-widgets-v3 .widget-title{font-size:10px;font-weight:600;letter-spacing:.3px}
 body.ui-widgets-v3 .widget-badge{border-radius:12px}
+/* ─── v3 Top Mode (enhanced) ─────────────────────────────────────────── */
+body.ui-top-v3 #topbar h1{font-size:13px;font-weight:750;letter-spacing:-.2px}
+body.ui-top-v3 .file-info{color:#687080;font-size:10px}
+body.ui-top-v3 .tb{height:30px;border-radius:6px}
+body.ui-top-v3 #upload-btn{height:30px;border-radius:6px}
+body.ui-top-v3 .brand-mark{width:26px;height:26px;border-radius:6px;font-size:12px}
+body.ui-top-v3 .sep{background:#1e2226}
+body.ui-top-v3 .topbar-save.ok{background:rgba(53,208,127,.1);border-color:rgba(53,208,127,.2)}
+/* ─── v3 Left Panel Mode (enhanced) ────────────────────────────────── */
+body.ui-left-v3 .sidebar-mode-tabs{background:#1a1f25;border-color:#2a3040;margin:6px 10px 4px}
+body.ui-left-v3 .sidebar-mode-tab{font-size:9px;font-weight:750;padding:5px 2px;letter-spacing:.4px}
+body.ui-left-v3 .sidebar-mode-tab.active{background:rgba(90,200,250,.15);color:#5ac8fa;box-shadow:inset 0 -2px 0 #5ac8fa}
+body.ui-left-v3 #search-input{background:#1a1f25;border-color:#2a3040;margin:4px 10px 6px;width:calc(100% - 20px)}
+body.ui-left-v3 #quick-tag-bar{padding:0 10px 6px}
+body.ui-left-v3 .qt-btn{height:23px;font-size:10px;background:#1e2530;border-color:#2a3647}
+body.ui-left-v3 .workflow-card{margin:4px 10px 7px;padding:8px 10px;background:#141b22;border-color:#253344}
+body.ui-left-v3 .widget-card{margin:0 10px 5px;padding:8px 10px}
+body.ui-left-v3 .widget-title{font-size:9px}
+body.ui-left-v3 .widget-body{font-size:10px}
+body.ui-left-v3 .group-header{padding:5px 10px;font-size:11px}
+body.ui-left-v3 .group-body{padding:4px 10px 10px}
+body.ui-left-v3 .pg-thumb{border-radius:5px}
+body.ui-left-v3 #sidebar-footer{padding:5px 8px}
+body.ui-left-v3 .inspection-panel{margin:4px 10px 2px}
+/* ─── v3 Right Panel Mode (enhanced) ───────────────────────────────── */
+body.ui-right-v3 #rp-content{background:#1d2127;padding:8px 10px}
+body.ui-right-v3 .rp-tabs{background:#1a1f25;border-color:#2a3040;margin-bottom:6px}
+body.ui-right-v3 .rp-tab{font-size:9px;font-weight:750;padding:5px 3px}
+body.ui-right-v3 .rp-tab.active{color:#5ac8fa}
+body.ui-right-v3 .rp-section{margin-bottom:6px}
+body.ui-right-v3 .rp-title{font-size:10px;letter-spacing:.5px;margin-bottom:3px}
+body.ui-right-v3 .rp-layer-row.active-layer{border-left-color:var(--blue);background:rgba(10,132,255,.08)}
+body.ui-right-v3 .rp-layer-row.active-layer:hover{background:rgba(10,132,255,.14)}
+body.ui-right-v3 .rp-icon-btn{height:24px;min-width:26px;font-size:10px;border-radius:4px}
+body.ui-right-v3 .rp-compat-note{font-size:10px;color:#4e5a6a;padding-top:5px;margin-top:3px}
+body.ui-right-v3 .rp-obj-row{border-radius:4px;font-size:10px;padding:4px 5px;margin-bottom:2px}
+body.ui-right-v3 .rp-metric{border-radius:4px;font-size:11px;margin-top:2px}
+body.ui-right-v3 .rp-page-ctx{font-size:9px}
+body.ui-right-v3 .rp-group{font-size:10px;margin:5px 0 3px}
+/* ─── v3 Widgets Mode (enhanced) ───────────────────────────────────── */
+body.ui-widgets-v3 .widget-card{margin:0 12px 5px;padding:8px 10px;background:#121a24;border-color:#263848}
+body.ui-widgets-v3 .widget-body{font-size:10px;line-height:1.45}
+body.ui-widgets-v3 .widget-link{font-size:9px;margin-top:4px}
+body.ui-widgets-v3 .widget-row{padding:1px 0}
+body.ui-widgets-v3 .widget-row b{font-size:10px}
+body.ui-widgets-v3 .wf-row{font-size:10px;padding:2px 0}
+body.ui-widgets-v3 #bottombar{background:#0c1117;border-top-color:#1e2530;padding:0 10px;gap:10px}
+body.ui-widgets-v3 .bb-item{font-size:11px}
+body.ui-widgets-v3 .sn-btn{height:22px;font-size:10px;padding:0 5px;border-radius:4px}
+body.ui-widgets-v3 .inspection-panel{margin:4px 12px 2px}

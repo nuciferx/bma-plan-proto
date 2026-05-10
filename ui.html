@@ -425,7 +425,7 @@ function getScaleForPage(pg){return pageStore[pg]?.calibScale||analyseCache[anal
 function getRot(n){return pageRotations[n]||0;}
 function getStore(n){if(!pageStore[n])pageStore[n]={lines:[],polys:[],openings:[],refs:[],parking:[],calibScale:null};return pageStore[n];}
 function saveCurrentPage(){normalizeCurrentObjects();const s=getStore(curPage);s.lines=[...mLines];s.polys=[...mPolys];s.openings=[...mOpenings];s.refs=[...mRefs];s.parking=[...mParking];ensureStoreObjectIds(s);if(pageData?.scale?.calibrated)s.calibScale=pageData.scale;}
-function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;_syncPageLayersToGlobals(n);updatePageSummary(n);}
+function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;_syncPageLayersToGlobals(n);validateObjectLayerScope(n);updatePageSummary(n);}
 function getNextPage(n){for(let i=n+1;i<=totalPages;i++)if(!excludedPages.has(i))return i;return null;}
 function getPrevPage(n){for(let i=n-1;i>=1;i--)if(!excludedPages.has(i))return i;return null;}
 function setWorkflowState(id,state){const el=document.getElementById(id);if(!el)return;el.classList.toggle("done",state==="done");el.classList.toggle("warn",state==="warn");el.classList.toggle("current",state==="current");}
@@ -869,6 +869,38 @@ function ensureStoreObjectIds(store){
 }
 function normalizeCurrentObjects(){const s={lines:mLines,polys:mPolys,openings:mOpenings,refs:mRefs,parking:mParking};ensureStoreObjectIds(s);mLines=s.lines;mPolys=s.polys;mOpenings=s.openings;mRefs=s.refs;mParking=s.parking;}
 function normalizeAllObjects(){saveCurrentPage();for(const store of Object.values(pageStore))ensureStoreObjectIds(store);for(const orient of Object.values(siteOrientation||{})){if(orient?.north)normalizeSemanticFields(orient.north,"north");}}
+function validateObjectLayerScope(pageIndex){
+  const layers=ensurePageLayers(pageIndex);
+  const s=getStore(pageIndex);
+  const allObjs=[
+    ...(s.polys||[]).map(o=>({o,kind:"poly"})),
+    ...(s.openings||[]).map(o=>({o,kind:"opening"})),
+    ...(s.refs||[]).map(o=>({o,kind:"ref"})),
+    ...(s.lines||[]).map(o=>({o,kind:"line"})),
+    ...(s.parking||[]).map(o=>({o,kind:"parking"})),
+  ];
+  const warnings=[];
+  allObjs.forEach(({o,kind})=>{
+    if(o.pageIndex===undefined)o.pageIndex=pageIndex;
+    if(!o.layerSlug){
+      if(kind==="opening")o.layerSlug="deduction";
+      else if(kind==="ref")o.layerSlug="reference_geometry";
+      else if(kind==="line")o.layerSlug="reference_geometry";
+      else o.layerSlug=getObjectLayerSlug(o);
+    }
+    if(!o.layerId){
+      const l=getLayerBySlug(pageIndex,o.layerSlug);
+      if(l)o.layerId=l.id;
+    }
+    if(o.pageIndex!==pageIndex)warnings.push({type:"cross_page",id:o.id,kind});
+    if(o.layerId&&!layers.find(l=>l.id===o.layerId)){
+      const repair=getLayerBySlug(pageIndex,o.layerSlug||"base_area");
+      o.layerId=repair?repair.id:null;
+      warnings.push({type:"orphan_layer",id:o.id,kind});
+    }
+  });
+  return warnings;
+}
 // ══════════════════════════════════════════════════════
 // Redraw
 // ══════════════════════════════════════════════════════

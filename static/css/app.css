@@ -461,3 +461,7 @@ body.ui-widgets-v3 #bottombar{background:#0c1117;border-top-color:#1e2530;paddin
 body.ui-widgets-v3 .bb-item{font-size:11px}
 body.ui-widgets-v3 .sn-btn{height:22px;font-size:10px;padding:0 5px;border-radius:4px}
 body.ui-widgets-v3 .inspection-panel{margin:4px 12px 2px}
+
+.recent-proj-row{padding:6px 12px;font-size:11px;cursor:pointer;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-proj-row:hover{background:var(--surface3)}
+.recent-proj-row.browse{color:var(--blue);font-weight:600}

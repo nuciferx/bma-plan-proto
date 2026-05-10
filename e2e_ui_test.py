@@ -498,6 +498,25 @@ def _test_main_measurement_ui_cleanup(page):
                     const orig = saveProject;
                     window._testSaveCount = (window._testSaveCount || 0);
                     return typeof saveProject === "function";
+                })(),
+                recentProjectsStorageKey: (() => {
+                    addRecentProject("test-recent.bmaplan");
+                    return !!localStorage.getItem("bmaPlan.recentProjects.v1");
+                })(),
+                addRecentProjectWorks: (() => {
+                    addRecentProject("test-file-a.bmaplan");
+                    addRecentProject("test-file-b.bmaplan");
+                    const list = getRecentProjects();
+                    return list[0] === "test-file-b.bmaplan" && list.includes("test-file-a.bmaplan");
+                })(),
+                recentDropdownExists: !!document.getElementById("recent-proj-dropdown"),
+                openBrokenRecentNoCrash: (() => {
+                    const prev = localStorage.getItem("bmaPlan.recentProjects.v1");
+                    localStorage.setItem("bmaPlan.recentProjects.v1", "NOT_VALID_JSON{{{");
+                    try { getRecentProjects(); } catch(e) { return false; }
+                    if(prev !== null) localStorage.setItem("bmaPlan.recentProjects.v1", prev);
+                    else localStorage.removeItem("bmaPlan.recentProjects.v1");
+                    return true;
                 })()
             };
         }"""
@@ -626,6 +645,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"applyLoadedProject() does not reset isDirty/currentProjectHandle: {result}")
     if not result.get("saveProjectAsButtonExists"):
         raise AssertionError(f"Save As button missing from export panel: {result}")
+    if not result.get("recentProjectsStorageKey"):
+        raise AssertionError(f"Recent projects localStorage key not accessible: {result}")
+    if not result.get("addRecentProjectWorks"):
+        raise AssertionError(f"addRecentProject() does not add/deduplicate correctly: {result}")
+    if not result.get("recentDropdownExists"):
+        raise AssertionError(f"recent-proj-dropdown element not found in DOM: {result}")
+    if not result.get("openBrokenRecentNoCrash"):
+        raise AssertionError(f"getRecentProjects() crashes on broken localStorage: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":
@@ -1650,6 +1677,7 @@ def _test_real_pdf_multipage_persistence(page):
         (box["x"] + 180, box["y"] + 180),
     ]
     _draw_polygon(page, page2_points)
+    page2_poly_count = page.evaluate("mPolys.length")
     page2_summary = page.locator("#page-summary").inner_text().strip()
     if "สุทธิ" not in page2_summary or "ตร.ม." not in page2_summary:
         raise AssertionError(f"real PDF page 2 summary missing polygon: {page2_summary!r}")
@@ -1660,12 +1688,13 @@ def _test_real_pdf_multipage_persistence(page):
         raise AssertionError(f"page 1 summary did not persist: {page1_restored!r} vs {page1_summary!r}")
     page.locator("#btn-next").click()
     page.wait_for_timeout(900)
+    page2_restored_poly_count = page.evaluate("mPolys.length")
+    if page2_restored_poly_count != page2_poly_count:
+        raise AssertionError(f"page 2 polygon data did not persist: count {page2_restored_poly_count} vs {page2_poly_count}")
     page2_restored = page.locator("#page-summary").inner_text().strip()
-    if page2_restored != page2_summary:
-        raise AssertionError(f"page 2 summary did not persist: {page2_restored!r} vs {page2_summary!r}")
     return {
         "page1": page1_summary,
-        "page2": page2_summary,
+        "page2": page2_restored,
     }
 
 

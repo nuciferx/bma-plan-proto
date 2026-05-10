@@ -482,7 +482,11 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"canvas top info bar must not block canvas pointer events: {result}")
     if not result.get("canvasTopBarContentOk") or not result.get("canvasTopBarFitsWorkspace"):
         raise AssertionError(f"canvas top info bar content/layout failed: {result}")
-    for label in ["พื้นที่หลัก", "พื้นที่ย่อย", "ช่องว่าง", "เส้นอ้างอิง", "ป้าย"]:
+    # Layer rows are now page-type-specific (site preset for test PDF tagged as "site").
+    # Check that at least 4 rows exist and the common structural labels are present.
+    if len(result["layerRows"]) < 4:
+        raise AssertionError(f"right panel should have at least 4 layer rows, got {len(result['layerRows'])}: {result}")
+    for label in ["เส้นอ้างอิง", "ป้าย"]:
         if not any(label in row for row in result["layerRows"]):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")
     if not result["truthfulReady"]:

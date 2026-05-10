@@ -463,41 +463,73 @@ def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
 
 @app.get("/thumb/{n}")
 def get_thumb(n: int, case_id: str, rot: int = 0):
+    _t0 = time.perf_counter()
     case = _get_case(case_id)
+    _t1 = time.perf_counter()
     if not case: return JSONResponse({"error":"invalid case"}, 400)
     doc = case.get("doc")
     page = _require_page(doc, n)
     if page is None: return JSONResponse({"error":"page out of range"}, 404)
     img_cache = case.setdefault("image_cache", {})
-    key = ("thumb", n, rot)
+    _jpg_quality = 70
+    key = ("thumb", n, rot, "jpeg", _jpg_quality)
     cached = _cache_get(img_cache, key)
+    _t2 = time.perf_counter()
     if cached is None:
         mat = fitz.Matrix(0.18, 0.18).prerotate(rot)
+        _t3 = time.perf_counter()
         pix = page.get_pixmap(matrix=mat)
+        _t4 = time.perf_counter()
         cached = _cache_put(
-            img_cache, key, pix.tobytes("jpeg", jpg_quality=70),
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=_jpg_quality),
             MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
         )
+        _t5 = time.perf_counter()
+        print(f"[BMA_THUMB_RENDER_PERF] thumb={n} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms cache={(_t2-_t1)*1000:.1f}ms "
+              f"get_pixmap={(_t4-_t3)*1000:.1f}ms encode={(_t5-_t4)*1000:.1f}ms "
+              f"bytes={len(cached)} total={(_t5-_t0)*1000:.1f}ms MISS", flush=True)
+    else:
+        _tf = time.perf_counter()
+        print(f"[BMA_THUMB_RENDER_PERF] thumb={n} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms total={(_tf-_t0)*1000:.1f}ms "
+              f"bytes={len(cached)} HIT", flush=True)
     return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
 
 @app.get("/thumb-md/{n}")
 def get_thumb_md(n: int, case_id: str, rot: int = 0):
     """Medium thumbnail for setup grid — 0.4x scale, quality 82"""
+    _t0 = time.perf_counter()
     case = _get_case(case_id)
+    _t1 = time.perf_counter()
     if not case: return JSONResponse({"error":"invalid case"}, 400)
     doc = case.get("doc")
     page = _require_page(doc, n)
     if page is None: return JSONResponse({"error":"page out of range"}, 404)
     img_cache = case.setdefault("image_cache", {})
-    key = ("thumb-md", n, rot)
+    _jpg_quality = 82
+    key = ("thumb-md", n, rot, "jpeg", _jpg_quality)
     cached = _cache_get(img_cache, key)
+    _t2 = time.perf_counter()
     if cached is None:
         mat = fitz.Matrix(0.4, 0.4).prerotate(rot)
+        _t3 = time.perf_counter()
         pix = page.get_pixmap(matrix=mat)
+        _t4 = time.perf_counter()
         cached = _cache_put(
-            img_cache, key, pix.tobytes("jpeg", jpg_quality=82),
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=_jpg_quality),
             MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
         )
+        _t5 = time.perf_counter()
+        print(f"[BMA_THUMB_RENDER_PERF] thumb-md={n} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms cache={(_t2-_t1)*1000:.1f}ms "
+              f"get_pixmap={(_t4-_t3)*1000:.1f}ms encode={(_t5-_t4)*1000:.1f}ms "
+              f"bytes={len(cached)} total={(_t5-_t0)*1000:.1f}ms MISS", flush=True)
+    else:
+        _tf = time.perf_counter()
+        print(f"[BMA_THUMB_RENDER_PERF] thumb-md={n} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms total={(_tf-_t0)*1000:.1f}ms "
+              f"bytes={len(cached)} HIT", flush=True)
     return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
 
 

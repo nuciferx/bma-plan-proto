@@ -775,7 +775,7 @@ def _test_backend_cache_limits():
         raise AssertionError(f"image cache entry cap failed: {len(cache)} > {server.MAX_IMAGE_CACHE_ENTRIES}")
     if cache_bytes > server.MAX_IMAGE_CACHE_BYTES:
         raise AssertionError(f"image cache byte cap failed: {cache_bytes} > {server.MAX_IMAGE_CACHE_BYTES}")
-    if ("thumb", 1, 0) not in cache or ("thumb-md", 1, 0) not in cache:
+    if ("thumb", 1, 0, "jpeg", 70) not in cache or ("thumb-md", 1, 0, "jpeg", 82) not in cache:
         raise AssertionError("thumbnail routes did not populate bounded image cache")
 
     xlsx = requests.post(

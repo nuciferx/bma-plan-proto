@@ -435,7 +435,8 @@ def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
     page = _require_page(doc, n)
     if page is None: return JSONResponse({"error":"page out of range"}, 404)
     img_cache = case.setdefault("image_cache", {})
-    key = ("page", n, render_scale, rot)
+    _jpg_quality = 88
+    key = ("page", n, render_scale, rot, "jpeg", _jpg_quality)
     cached = _cache_get(img_cache, key)
     _t2 = time.perf_counter()
     if cached is None:
@@ -444,7 +445,7 @@ def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
         pix = page.get_pixmap(matrix=mat)
         _t4 = time.perf_counter()
         cached = _cache_put(
-            img_cache, key, pix.tobytes("jpeg", jpg_quality=88),
+            img_cache, key, pix.tobytes("jpeg", jpg_quality=_jpg_quality),
             MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
         )
         _t5 = time.perf_counter()

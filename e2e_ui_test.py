@@ -404,7 +404,46 @@ def _test_main_measurement_ui_cleanup(page):
                 })(),
                 canvasTopBarFitsWorkspace: canvasTopRect.left >= workspaceRect.left &&
                     canvasTopRect.right <= workspaceRect.right &&
-                    canvasTopRect.top >= workspaceRect.top
+                    canvasTopRect.top >= workspaceRect.top,
+                optionsBtnVisible: isVisible(document.querySelector("#btn-ui-layout")),
+                optionsPanelExists: !!document.querySelector("#ui-layout-panel"),
+                currentStablePresetExists: !!document.querySelector("#ulp-preset-current"),
+                mockupV3PresetExists: !!document.querySelector("#ulp-preset-v3"),
+                optionsPanelOpens: (() => {
+                    const panel = document.getElementById("ui-layout-panel");
+                    if (!panel) return false;
+                    toggleUiLayoutPanel();
+                    const open = panel.style.display === "flex";
+                    closeUiLayoutPanel();
+                    const closed = panel.style.display === "none";
+                    return open && closed;
+                })(),
+                topModeSwitchNoCrash: (() => {
+                    try { setUiLayoutOption("top","v3"); setUiLayoutOption("top","current"); return true; } catch(e) { return false; }
+                })(),
+                leftModeSwitchNoCrash: (() => {
+                    try { setUiLayoutOption("left","v3"); setUiLayoutOption("left","current"); return true; } catch(e) { return false; }
+                })(),
+                rightModeSwitchNoCrash: (() => {
+                    try { setUiLayoutOption("right","v3"); setUiLayoutOption("right","current"); return true; } catch(e) { return false; }
+                })(),
+                widgetsModeSwitchNoCrash: (() => {
+                    try { setUiLayoutOption("widgets","v3"); setUiLayoutOption("widgets","current"); return true; } catch(e) { return false; }
+                })(),
+                localStorageKeyWritten: (() => {
+                    setUiLayoutOption("top","v3");
+                    const ok = !!localStorage.getItem("bmaPlan.uiLayoutOptions.v1");
+                    setUiLayoutOption("top","current");
+                    return ok;
+                })(),
+                resetRestoresCurrentStable: (() => {
+                    applyUiLayoutPreset("mockup_v3");
+                    applyUiLayoutPreset("current");
+                    return !document.body.classList.contains("ui-top-v3") &&
+                           !document.body.classList.contains("ui-left-v3") &&
+                           !document.body.classList.contains("ui-right-v3") &&
+                           !document.body.classList.contains("ui-widgets-v3");
+                })()
             };
         }"""
     )
@@ -491,6 +530,29 @@ def _test_main_measurement_ui_cleanup(page):
             raise AssertionError(f"right panel missing layer row {label!r}: {result}")
     if not result["truthfulReady"]:
         raise AssertionError(f"scale ready state shown without real scale: {result}")
+    # UI Layout Options assertions
+    if not result.get("optionsBtnVisible"):
+        raise AssertionError(f"Layout Options button (#btn-ui-layout) not visible: {result}")
+    if not result.get("optionsPanelExists"):
+        raise AssertionError(f"Layout Options panel (#ui-layout-panel) not found in DOM: {result}")
+    if not result.get("currentStablePresetExists"):
+        raise AssertionError(f"Current Stable preset button (#ulp-preset-current) not found: {result}")
+    if not result.get("mockupV3PresetExists"):
+        raise AssertionError(f"Mockup V3 preset button (#ulp-preset-v3) not found: {result}")
+    if not result.get("optionsPanelOpens"):
+        raise AssertionError(f"Layout Options panel does not open/close correctly: {result}")
+    if not result.get("topModeSwitchNoCrash"):
+        raise AssertionError(f"Switching Top Area mode crashed: {result}")
+    if not result.get("leftModeSwitchNoCrash"):
+        raise AssertionError(f"Switching Left Panel mode crashed: {result}")
+    if not result.get("rightModeSwitchNoCrash"):
+        raise AssertionError(f"Switching Right Panel mode crashed: {result}")
+    if not result.get("widgetsModeSwitchNoCrash"):
+        raise AssertionError(f"Switching Widgets mode crashed: {result}")
+    if not result.get("localStorageKeyWritten"):
+        raise AssertionError(f"localStorage key 'bmaPlan.uiLayoutOptions.v1' not written: {result}")
+    if not result.get("resetRestoresCurrentStable"):
+        raise AssertionError(f"Reset to Current Stable did not remove all v3 classes: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":

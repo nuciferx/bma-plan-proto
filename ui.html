@@ -24,6 +24,7 @@
       <div class="sep"></div>
       <button class="tb" id="btn-scale-current" title="Set Scale Current Page" onclick="if(totalPages)setMode('calib');else alert('เปิด PDF ก่อน')">Set Scale</button>
       <button class="tb" id="btn-setup" title="Page Setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">Page Setup</button>
+      <button class="tb" id="btn-ui-layout" onclick="toggleUiLayoutPanel()" title="Layout Options">⚙ Layout</button>
     </div>
     <div class="topbar-zone topbar-zone-b">
       <button class="tb" id="btn-prev" onclick="const p=getPrevPage(curPage);if(p)loadPage(p)">◀</button>
@@ -287,6 +288,56 @@
 <canvas id="loupe" style="display:none;position:fixed;border-radius:50%;border:2px solid #636366;box-shadow:0 4px 20px rgba(0,0,0,.8);pointer-events:none;z-index:9999;"></canvas>
 <div id="scale-mgr-overlay" onclick="if(event.target===this)closeScaleManager()"><div id="scale-mgr-box" onclick="event.stopPropagation()"><div id="scale-mgr-header"><h3>📐 Scale ทุกหน้า</h3><button class="tb danger" onclick="closeScaleManager()">✕</button></div><div id="scale-mgr-body"></div></div></div>
 <div id="pgmgr-overlay" onclick="if(event.target===this)closePgMgr()"><div id="pgmgr-box" onclick="event.stopPropagation()" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(90vw,820px);max-height:85vh;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7)"><div id="pgmgr-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="font-size:13px;font-weight:700;flex:1">📄 จัดการหน้า</h3><span id="pgmgr-sel-info" style="font-size:11px;color:var(--text2);min-width:80px">เลือก 0 หน้า</span><button class="tb" onclick="pgmgrSelectAll()">เลือกทั้งหมด</button><button class="tb" onclick="pgmgrClearAll()">ยกเลิก</button><button class="tb danger" onclick="closePgMgr()">✕</button></div><div id="pgmgr-grid" style="display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding:4px 2px;flex:1"></div><div class="pgmgr-footer" style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid var(--border)"><button class="tb" style="background:var(--blue);color:#fff" onclick="pgmgrExportPDF(false)">⬇ Save PDF</button><button class="tb" style="background:var(--blue);color:#fff" onclick="pgmgrExportPDF(true)">⬇ PDF + annotations</button><button class="tb" onclick="saveProject()">💾 บันทึกโปรเจกต์</button></div></div></div>
+<div id="ui-layout-panel" style="display:none">
+  <div class="ulp-header">
+    <span class="ulp-title">Layout Options</span>
+    <button class="ulp-close" onclick="closeUiLayoutPanel()">✕</button>
+  </div>
+  <div class="ulp-presets">
+    <div class="ulp-sect-label">Presets</div>
+    <div class="ulp-preset-row">
+      <button id="ulp-preset-current" class="ulp-preset-btn" onclick="applyUiLayoutPreset('current')">Current Stable</button>
+      <button id="ulp-preset-v3" class="ulp-preset-btn" onclick="applyUiLayoutPreset('mockup_v3')">Mockup V3</button>
+      <button id="ulp-preset-inspection" class="ulp-preset-btn" onclick="applyUiLayoutPreset('inspection')">Inspection Focus</button>
+      <button id="ulp-preset-layer" class="ulp-preset-btn" onclick="applyUiLayoutPreset('layer_focus')">Layer Focus</button>
+      <button id="ulp-preset-compact" class="ulp-preset-btn" onclick="applyUiLayoutPreset('compact')">Compact</button>
+    </div>
+  </div>
+  <div class="ulp-sections">
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">A. Top Area</div>
+      <div class="ulp-opts">
+        <button id="ulp-top-current" class="ulp-opt" onclick="setUiLayoutOption('top','current')">Current Compact Topbar</button>
+        <button id="ulp-top-v3" class="ulp-opt" onclick="setUiLayoutOption('top','v3')">Mockup V3 Menu Style</button>
+      </div>
+    </div>
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">B. Left Panel</div>
+      <div class="ulp-opts">
+        <button id="ulp-left-current" class="ulp-opt" onclick="setUiLayoutOption('left','current')">Current Inspection Sidebar</button>
+        <button id="ulp-left-v3" class="ulp-opt" onclick="setUiLayoutOption('left','v3')">Mockup V3 Sheets Style</button>
+      </div>
+    </div>
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">C. Right Panel</div>
+      <div class="ulp-opts">
+        <button id="ulp-right-current" class="ulp-opt" onclick="setUiLayoutOption('right','current')">Current Layers Panel</button>
+        <button id="ulp-right-v3" class="ulp-opt" onclick="setUiLayoutOption('right','v3')">Mockup V3 Layer Manager</button>
+      </div>
+    </div>
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">D. Widgets</div>
+      <div class="ulp-opts">
+        <button id="ulp-widgets-current" class="ulp-opt" onclick="setUiLayoutOption('widgets','current')">Current Status Widgets</button>
+        <button id="ulp-widgets-v3" class="ulp-opt" onclick="setUiLayoutOption('widgets','v3')">Mockup V3 Summary Style</button>
+      </div>
+    </div>
+  </div>
+  <div class="ulp-footer">
+    <button class="ulp-reset-btn" onclick="applyUiLayoutPreset('current')">↺ Reset to Current Stable</button>
+    <button class="ulp-reset-btn" onclick="applyUiLayoutPreset('mockup_v3')">→ Reset to Mockup V3</button>
+  </div>
+</div>
 <script src="/static/js/semantic-meta.js"></script>
 <script src="/static/js/opening-parent.js"></script>
 <script>
@@ -1257,6 +1308,61 @@ function closeExportPanel(){document.getElementById("export-panel").classList.re
 // ══════════════════════════════════════════════════════
 function updatePageSummary(pg=curPage){const el=document.getElementById("page-summary");if(!el)return;const store=getStore(pg);const polys=pg===curPage?mPolys:(store.polys||[]);const openings=pg===curPage?mOpenings:(store.openings||[]);const parking=pg===curPage?mParking:(store.parking||[]);const refs=pg===curPage?mRefs:(store.refs||[]);const closed=polys.filter(p=>p.closed);const closedOp=openings.filter(o=>o.closed);if(!closed.length&&!closedOp.length&&!parking.length&&!refs.length){el.textContent="ยังไม่มีรายการพื้นที่";return;}let roomArea=0,landArea=0,opArea=0;for(const poly of closed){const area=polyMetrics(poly,pg).area;if(area==null)continue;if(poly.areaType==="land")landArea+=area;else roomArea+=area;}for(const op of closedOp){const area=polyAreaM2(op.pts);if(area!=null)opArea+=area;}const net=roomArea+landArea-opArea;const parts=[];if(roomArea>0)parts.push(`อาคาร/ห้อง ${roomArea.toFixed(2)}`);if(landArea>0)parts.push(`ที่ดิน ${landArea.toFixed(2)}`);if(opArea>0)parts.push(`(-)ช่องว่าง ${opArea.toFixed(2)}`);if(parking.length)parts.push(`ที่จอด ${parking.reduce((s,p)=>s+(p.count||1),0)} คัน`);if(refs.length)parts.push(`เส้นอ้างอิง ${refs.length}`);parts.push(`สุทธิ ${net.toFixed(2)} ตร.ม.`);el.textContent=parts.join(" · ");}
 function initTooltips(){const tips={"#sidebar-toggle":"เปิด/ปิดแถบหน้า","#upload-btn":"เปิดไฟล์ PDF","#top-open-project":"เปิดไฟล์โปรเจกต์ .bmaplan","#btn-sample-pdf":"เปิด PDF ตัวอย่างสำหรับทดสอบ workflow","#btn-export-report":"เปิดเมนูส่งออกรายงาน","#btn-report":"เปิดสรุปการวัดและ warnings","#btn-setup":"ตั้งค่าโปรเจกต์และ tag หน้า","#btn-prev":"ไปหน้าก่อนหน้า","#btn-next":"ไปหน้าถัดไป","#sn-ep":"Snap endpoint ปลายเส้น","#sn-mp":"Snap midpoint กึ่งกลางเส้น","#sn-ct":"Snap center จุดกึ่งกลาง","#sn-nl":"Snap nearest line จุดใกล้เส้นที่สุด","#sn-ix":"Snap intersection จุดตัดเส้น","#sn-off":"ปิด snap","#btn-perp":"Snap ตั้งฉากกับเส้นใกล้ที่สุด","#btn-opening":"วาดช่องว่าง/พื้นที่หักออก","#btn-pan":"เลื่อนกระดาษและซูม","#btn-sel":"เลือก/ย้าย/แก้สี object","#btn-dist":"วัดระยะ 2 จุด","#btn-path":"วัดระยะต่อเนื่องหลายจุด กด Enter เพื่อจบ","#btn-ref":"วาดเส้นอ้างอิง เช่น ถนน คลอง ผนัง","#btn-north":"ตั้งทิศเหนือด้วยการคลิกฐานและปลายลูกศร N","#btn-refdist":"แสดงระยะจาก object ที่เลือกไปหาเส้นอ้างอิง","#btn-setbackdist":"แสดง/ซ่อนระยะช่วยวัดระหว่างแนวอาคารกับที่ดิน","#btn-land-edge":"กำหนดชนิดด้านของ polygon ที่ดิน","#btn-parcel-boundary":"วาดกรอบที่ดินด้วยเครื่องมือพื้นที่เดิม","#ref-type":"เลือกชนิดเส้นอ้างอิง","#btn-parking":"คลิกนับช่องจอดรถ 1 ครั้ง = 1 คัน","#parking-type":"เลือกชนิดที่จอดรถ","#btn-area":"วาดพื้นที่ polygon","#btn-calib":"สอบเทียบ scale ด้วยระยะจริง","#btn-redo":"ทำซ้ำรายการที่ Undo ล่าสุด","#btn-delete-selected":"ลบ object ที่เลือก","button[onclick='clearMeasures()']":"ล้างรายการวัดบนหน้านี้","button[onclick='undo()']":"ย้อนกลับรายการล่าสุด"};for(const[sel,text]of Object.entries(tips)){document.querySelectorAll(sel).forEach(el=>{el.title=text;el.setAttribute("aria-label",text);});}}
+// ══════════════════════════════════════════════════════
+// UI Layout Options
+// ══════════════════════════════════════════════════════
+const UI_LAYOUT_KEY='bmaPlan.uiLayoutOptions.v1';
+let uiLayout={top:'current',left:'current',right:'current',widgets:'current'};
+function loadUiLayout(){
+  try{const s=localStorage.getItem(UI_LAYOUT_KEY);if(s){const p=JSON.parse(s);uiLayout=Object.assign({top:'current',left:'current',right:'current',widgets:'current'},p);}}catch(e){}
+  applyUiLayout();
+}
+function saveUiLayout(){try{localStorage.setItem(UI_LAYOUT_KEY,JSON.stringify(uiLayout));}catch(e){}}
+function applyUiLayout(){
+  const b=document.body;
+  b.classList.toggle('ui-top-v3',uiLayout.top==='v3');
+  b.classList.toggle('ui-left-v3',uiLayout.left==='v3');
+  b.classList.toggle('ui-right-v3',uiLayout.right==='v3');
+  b.classList.toggle('ui-widgets-v3',uiLayout.widgets==='v3');
+  _updateUiLayoutPanelState();
+}
+function setUiLayoutOption(section,value){uiLayout[section]=value;applyUiLayout();saveUiLayout();}
+function applyUiLayoutPreset(name){
+  const presets={
+    current:{top:'current',left:'current',right:'current',widgets:'current'},
+    mockup_v3:{top:'v3',left:'v3',right:'v3',widgets:'v3'},
+    inspection:{top:'current',left:'v3',right:'current',widgets:'current'},
+    layer_focus:{top:'current',left:'current',right:'v3',widgets:'current'},
+    compact:{top:'current',left:'current',right:'current',widgets:'current'},
+  };
+  const p=presets[name];if(!p)return;
+  uiLayout=Object.assign({},p);applyUiLayout();saveUiLayout();
+}
+function _updateUiLayoutPanelState(){
+  ['top','left','right','widgets'].forEach(s=>{
+    const cur=document.getElementById('ulp-'+s+'-current');
+    const v3=document.getElementById('ulp-'+s+'-v3');
+    if(cur)cur.classList.toggle('active',uiLayout[s]==='current');
+    if(v3)v3.classList.toggle('active',uiLayout[s]==='v3');
+  });
+  const panel=document.getElementById('ui-layout-panel');
+  const btn=document.getElementById('btn-ui-layout');
+  if(btn)btn.classList.toggle('active',!!(panel&&panel.style.display==='flex'));
+}
+function toggleUiLayoutPanel(){
+  const p=document.getElementById('ui-layout-panel');if(!p)return;
+  const open=p.style.display==='flex';
+  p.style.display=open?'none':'flex';
+  _updateUiLayoutPanelState();
+}
+function closeUiLayoutPanel(){const p=document.getElementById('ui-layout-panel');if(p){p.style.display='none';_updateUiLayoutPanelState();}}
+document.addEventListener('click',function(e){
+  const panel=document.getElementById('ui-layout-panel');
+  const btn=document.getElementById('btn-ui-layout');
+  if(!panel||panel.style.display!=='flex')return;
+  if(!panel.contains(e.target)&&e.target!==btn&&!(btn&&btn.contains(e.target)))closeUiLayoutPanel();
+});
+loadUiLayout();
 initTooltips();
 buildRightPanel();
 document.getElementById("inp-color").addEventListener("mousedown",()=>{if(selItem)pushUndo();});

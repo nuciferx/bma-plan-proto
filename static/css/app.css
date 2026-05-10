@@ -364,3 +364,48 @@ canvas{display:block}
 .scmgr-table th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
 .scmgr-table td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04)}
 .scmgr-table td.ok{color:var(--green)}.scmgr-table td.warn{color:var(--orange)}
+/* ─── UI Layout Panel ──────────────────────────────────────────────── */
+#btn-ui-layout{font-size:11px}
+#ui-layout-panel{position:fixed;top:52px;left:340px;z-index:500;width:340px;background:rgba(12,17,25,.98);border:1px solid #2a3747;border-radius:12px;flex-direction:column;gap:0;box-shadow:0 12px 40px rgba(0,0,0,.6);backdrop-filter:blur(12px);overflow:hidden}
+.ulp-header{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #1e2a38}
+.ulp-title{flex:1;font-size:12px;font-weight:700;color:var(--text)}
+.ulp-close{background:transparent;border:none;color:var(--text3);font-size:14px;cursor:pointer;width:24px;height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center}
+.ulp-close:hover{background:#273241;color:var(--text)}
+.ulp-presets{padding:8px 14px;border-bottom:1px solid #1a2330}
+.ulp-preset-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.ulp-preset-btn{height:26px;padding:0 10px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap}
+.ulp-preset-btn:hover{background:var(--surface3);color:var(--text)}
+.ulp-preset-btn.active{background:rgba(10,132,255,.18);border-color:var(--blue);color:var(--blue)}
+.ulp-sections{padding:6px 14px;display:flex;flex-direction:column;gap:6px}
+.ulp-sect{display:flex;flex-direction:column;gap:4px}
+.ulp-sect-label{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.7px}
+.ulp-opts{display:flex;gap:4px}
+.ulp-opt{flex:1;height:28px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}
+.ulp-opt:hover{background:var(--surface3);color:var(--text)}
+.ulp-opt.active{background:rgba(10,132,255,.18);border-color:var(--blue);color:var(--blue)}
+.ulp-footer{display:flex;gap:6px;padding:8px 14px;border-top:1px solid #1a2330}
+.ulp-reset-btn{flex:1;height:28px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:6px;cursor:pointer}
+.ulp-reset-btn:hover{background:var(--surface3);color:var(--text)}
+/* ─── v3 Top Mode ─────────────────────────────────────────────────── */
+body.ui-top-v3 #topbar{background:#141618;border-bottom-color:#0d0e10;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+body.ui-top-v3 .topbar-zone-b{border-color:#1e2226}
+body.ui-top-v3 .brand-mark{border-radius:4px}
+/* ─── v3 Right Panel Mode ──────────────────────────────────────────── */
+body.ui-right-v3 #right-panel{background:#22262c;border-left-color:#3a404a}
+body.ui-right-v3 #rp-header{border-bottom-color:#3a404a;padding:6px 12px}
+body.ui-right-v3 #rp-header h2{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#9aa0aa}
+body.ui-right-v3 .rp-layer-row{background:transparent;border:none;border-left:2px solid transparent;border-radius:0;padding:5px 10px;margin-bottom:0}
+body.ui-right-v3 .rp-layer-row:hover{background:#2a2f37}
+body.ui-right-v3 .rp-layer-dot{border-radius:2px}
+body.ui-right-v3 .rp-layer-count{background:transparent;padding:0}
+body.ui-right-v3 .rp-compat-section{border-top-color:#3a404a}
+/* ─── v3 Left Panel Mode ──────────────────────────────────────────── */
+body.ui-left-v3 #sidebar{background:#22262c;border-right-color:#3a404a}
+body.ui-left-v3 #sidebar-header{background:#1e2226;border-bottom-color:#3a404a}
+body.ui-left-v3 .sidebar-mode-tab{font-size:9px;letter-spacing:.5px}
+body.ui-left-v3 .lp-page-info{background:transparent;border-bottom-color:#3a404a}
+body.ui-left-v3 .workflow-card{background:#1e2429;border-color:#2a3540}
+/* ─── v3 Widgets Mode ─────────────────────────────────────────────── */
+body.ui-widgets-v3 .widget-card{border-radius:10px;border-color:#3a404a;backdrop-filter:blur(12px)}
+body.ui-widgets-v3 .widget-title{font-size:10px;font-weight:600;letter-spacing:.3px}
+body.ui-widgets-v3 .widget-badge{border-radius:12px}

@@ -422,7 +422,9 @@ def sample_pdf():
 
 @app.get("/page/{n}")
 def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
+    _t0 = time.perf_counter()
     case = _get_case(case_id)
+    _t1 = time.perf_counter()
     if not case: return JSONResponse({"error":"invalid case"}, 400)
     render_scale = _normalize_render_scale(scale)
     if render_scale is None:
@@ -435,13 +437,26 @@ def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
     img_cache = case.setdefault("image_cache", {})
     key = ("page", n, render_scale, rot)
     cached = _cache_get(img_cache, key)
+    _t2 = time.perf_counter()
     if cached is None:
         mat = fitz.Matrix(render_scale, render_scale).prerotate(rot)
+        _t3 = time.perf_counter()
         pix = page.get_pixmap(matrix=mat)
+        _t4 = time.perf_counter()
         cached = _cache_put(
             img_cache, key, pix.tobytes("jpeg", jpg_quality=88),
             MAX_IMAGE_CACHE_ENTRIES, MAX_IMAGE_CACHE_BYTES
         )
+        _t5 = time.perf_counter()
+        print(f"[BMA_PAGE_RENDER_PERF] page={n} scale={render_scale} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms cache={(_t2-_t1)*1000:.1f}ms "
+              f"get_pixmap={(_t4-_t3)*1000:.1f}ms encode={(_t5-_t4)*1000:.1f}ms "
+              f"bytes={len(cached)} total={(_t5-_t0)*1000:.1f}ms MISS", flush=True)
+    else:
+        _tf = time.perf_counter()
+        print(f"[BMA_PAGE_RENDER_PERF] page={n} scale={render_scale} rot={rot} "
+              f"session={(_t1-_t0)*1000:.1f}ms total={(_tf-_t0)*1000:.1f}ms "
+              f"bytes={len(cached)} HIT", flush=True)
     return Response(cached, media_type="image/jpeg")
 
 

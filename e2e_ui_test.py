@@ -443,6 +443,17 @@ def _test_main_measurement_ui_cleanup(page):
                            !document.body.classList.contains("ui-left-v3") &&
                            !document.body.classList.contains("ui-right-v3") &&
                            !document.body.classList.contains("ui-widgets-v3");
+                })(),
+                leftPanelScrollBodyExists: !!document.querySelector(".sidebar-scroll-body"),
+                rightPanelScrollBodyOk: (() => { const rc = document.querySelector("#rp-content"); return !!rc && getComputedStyle(rc).overflowY === "auto"; })(),
+                rightPanelHeaderShowsPageContext: !!document.querySelector("#rp-header .rp-page-ctx"),
+                activeBadgeClassStyled: (() => {
+                    const tmp = document.createElement("span");
+                    tmp.className = "rp-active-lyr";
+                    document.body.appendChild(tmp);
+                    const styled = getComputedStyle(tmp).fontWeight === "800";
+                    document.body.removeChild(tmp);
+                    return styled;
                 })()
             };
         }"""
@@ -553,6 +564,14 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"localStorage key 'bmaPlan.uiLayoutOptions.v1' not written: {result}")
     if not result.get("resetRestoresCurrentStable"):
         raise AssertionError(f"Reset to Current Stable did not remove all v3 classes: {result}")
+    if not result.get("leftPanelScrollBodyExists"):
+        raise AssertionError(f"Left panel .sidebar-scroll-body scroll wrapper not found: {result}")
+    if not result.get("rightPanelScrollBodyOk"):
+        raise AssertionError(f"Right panel #rp-content does not have overflow-y:auto: {result}")
+    if not result.get("rightPanelHeaderShowsPageContext"):
+        raise AssertionError(f"Right panel header #rp-header .rp-page-ctx not found after page load: {result}")
+    if not result.get("activeBadgeClassStyled"):
+        raise AssertionError(f"CSS class .rp-active-lyr is not properly styled (font-weight:800 expected): {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":

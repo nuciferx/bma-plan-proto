@@ -1,0 +1,2953 @@
+"""
+server.py — PDF Scale Backend v4
+รัน: python server.py
+เปิด: http://localhost:8000
+"""
+import io, math, re, json, tempfile, os, time
+from typing import Optional
+from uuid import uuid4
+
+import ctypes
+
+import fitz
+import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
+
+try:
+    import xlsxwriter
+    HAS_XLSX = True
+except ImportError:
+    HAS_XLSX = False
+
+app = FastAPI()
+
+CASES: dict = {}
+PT_PER_MM = 72 / 25.4
+SCALE_RE  = re.compile(r'1\s*[:/]\s*(\d{2,5})', re.IGNORECASE)
+SNAP_GRID = 25   # PDF pt — 1 snap per cell
+MAX_UPLOAD_BYTES = 80 * 1024 * 1024
+CASE_TTL_SECONDS = 2 * 60 * 60
+MAX_CASES = 12
+
+
+# ══════════════════════════════════════════════════════
+# helpers
+# ══════════════════════════════════════════════════════
+def detect_scale(page: fitz.Page) -> Optional[dict]:
+    spans = []
+    for b in page.get_text("dict")["blocks"]:
+        if b.get("type") != 0: continue
+        for line in b["lines"]:
+            for sp in line["spans"]:
+                m = SCALE_RE.search(sp["text"])
+                if m:
+                    spans.append({"N": int(m.group(1)), "size": sp["size"]})
+    if not spans: return None
+    best = max(spans, key=lambda s: s["size"])
+    N = best["N"]
+    return {"N": N, "label": f"1:{N}",
+            "pts_per_m": round((1000 / N) * PT_PER_MM, 4),
+            "source": "auto", "verified": False}
+
+
+def _cleanup_file(path: Optional[str]):
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _make_case(doc: fitz.Document, path: str):
+    _prune_cases()
+    case_id = uuid4().hex
+    CASES[case_id] = {
+        "doc": doc,
+        "path": path,
+        "page_cache": {},
+        "image_cache": {},
+        "page_tags": {},
+        "project_info": {},
+        "created_at": time.time(),
+        "last_access": time.time(),
+    }
+    return case_id
+
+
+def _close_case(case: dict):
+    doc = case.get("doc")
+    if doc:
+        try:
+            doc.close()
+        except Exception:
+            pass
+    _cleanup_file(case.get("path"))
+
+
+def _prune_cases():
+    now = time.time()
+    stale = [cid for cid, case in CASES.items() if now - case.get("last_access", case.get("created_at", now)) > CASE_TTL_SECONDS]
+    for cid in stale:
+        _close_case(CASES.pop(cid, {}))
+    if len(CASES) < MAX_CASES:
+        return
+    ordered = sorted(CASES.items(), key=lambda kv: kv[1].get("last_access", 0))
+    for cid, case in ordered[: max(0, len(CASES) - MAX_CASES + 1)]:
+        _close_case(case)
+        CASES.pop(cid, None)
+
+
+def _get_case(case_id: str):
+    if not case_id:
+        return None
+    _prune_cases()
+    case = CASES.get(case_id)
+    if case:
+        case["last_access"] = time.time()
+    return case
+
+
+def _require_page(doc: fitz.Document, n: int):
+    if n < 1 or n > len(doc):
+        return None
+    return doc[n - 1]
+
+
+def extract_snaps_typed(drawings: list, max_snaps=2000, max_lines=2000):
+    """Returns (snaps, lines).
+    snaps: [{x,y,t}]  t = ep|mp|ct
+    lines: [[x0,y0,x1,y1], ...]  for NL/IX client-side snap
+    """
+    ep_grid, mp_grid, ct_grid = {}, {}, {}
+    lines_out = []
+
+    for d in drawings:
+        for item in d["items"]:
+            op = item[0]
+            if op == "l":
+                p1, p2 = item[1], item[2]
+                # EP – endpoints
+                for pt in [p1, p2]:
+                    k = (int(pt.x / SNAP_GRID), int(pt.y / SNAP_GRID))
+                    if k not in ep_grid:
+                        ep_grid[k] = (round(pt.x, 1), round(pt.y, 1))
+                # MP – midpoint
+                mx, my = (p1.x + p2.x) / 2, (p1.y + p2.y) / 2
+                k = (int(mx / SNAP_GRID), int(my / SNAP_GRID))
+                if k not in mp_grid:
+                    mp_grid[k] = (round(mx, 1), round(my, 1))
+                # lines for NL/IX
+                if len(lines_out) < max_lines:
+                    lines_out.append([round(p1.x,1), round(p1.y,1),
+                                      round(p2.x,1), round(p2.y,1)])
+            elif op == "re":
+                r = item[1]
+                # EP – corners
+                for pt in [(r.x0,r.y0),(r.x1,r.y0),(r.x1,r.y1),(r.x0,r.y1)]:
+                    k = (int(pt[0] / SNAP_GRID), int(pt[1] / SNAP_GRID))
+                    if k not in ep_grid:
+                        ep_grid[k] = (round(pt[0],1), round(pt[1],1))
+                # CT – rectangle center
+                cx2, cy2 = (r.x0+r.x1)/2, (r.y0+r.y1)/2
+                k = (int(cx2 / SNAP_GRID), int(cy2 / SNAP_GRID))
+                if k not in ct_grid:
+                    ct_grid[k] = (round(cx2,1), round(cy2,1))
+                # edges as lines
+                if len(lines_out) < max_lines:
+                    for seg in [(r.x0,r.y0,r.x1,r.y0),(r.x1,r.y0,r.x1,r.y1),
+                                (r.x1,r.y1,r.x0,r.y1),(r.x0,r.y1,r.x0,r.y0)]:
+                        lines_out.append([round(v,1) for v in seg])
+
+    snaps  = [{"x":v[0],"y":v[1],"t":"ep"} for v in list(ep_grid.values())[:max_snaps//2]]
+    snaps += [{"x":v[0],"y":v[1],"t":"mp"} for v in list(mp_grid.values())[:max_snaps//4]]
+    snaps += [{"x":v[0],"y":v[1],"t":"ct"} for v in list(ct_grid.values())[:max_snaps//4]]
+    return snaps, lines_out[:max_lines]
+
+
+def extract_snaps_pdfium(pdf_path: str, page_index: int, max_snaps=2000, max_lines=2000):
+    """
+    Extract snap points และ lines จาก PDF โดยตรงผ่าน PDFium engine
+    เร็วกว่า PyMuPDF 2.6x และแม่นกว่าเพราะอ่าน path object โดยตรง
+
+    Returns:
+        snaps: list of {x, y, t}  t = "ep" | "mp" | "ct"
+        lines: list of [x0, y0, x1, y1]
+    """
+    doc = pdfium.PdfDocument(pdf_path)
+    page = doc[page_index]
+    page_h = page.get_height()
+    rp = page.raw
+
+    GRID = 25
+    ep_grid = {}
+    mp_grid = {}
+    ct_grid = {}
+    lines_out = []
+
+    n_obj = pdfium_c.FPDFPage_CountObjects(rp)
+
+    for i in range(n_obj):
+        obj = pdfium_c.FPDFPage_GetObject(rp, i)
+        obj_type = pdfium_c.FPDFPageObj_GetType(obj)
+
+        if obj_type != pdfium_c.FPDF_PAGEOBJ_PATH:
+            continue
+
+        n_seg = pdfium_c.FPDFPath_CountSegments(obj)
+        pts = []
+
+        for j in range(n_seg):
+            seg = pdfium_c.FPDFPath_GetPathSegment(obj, j)
+            x = ctypes.c_float()
+            y = ctypes.c_float()
+            pdfium_c.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+            cx = round(x.value, 1)
+            cy = round(page_h - y.value, 1)
+            pts.append((cx, cy))
+
+        # EP — ทุกจุดของ path
+        for pt in pts:
+            k = (int(pt[0] / GRID), int(pt[1] / GRID))
+            if k not in ep_grid:
+                ep_grid[k] = pt
+
+        # MP — จุดกึ่งกลางระหว่างแต่ละคู่จุด
+        for k in range(len(pts) - 1):
+            mx = (pts[k][0] + pts[k+1][0]) / 2
+            my = (pts[k][1] + pts[k+1][1]) / 2
+            gk = (int(mx / GRID), int(my / GRID))
+            if gk not in mp_grid:
+                mp_grid[gk] = (round(mx, 1), round(my, 1))
+
+            if len(lines_out) < max_lines:
+                lines_out.append([
+                    round(pts[k][0], 1), round(pts[k][1], 1),
+                    round(pts[k+1][0], 1), round(pts[k+1][1], 1)
+                ])
+
+        # CT — center of bounding box ของแต่ละ path object
+        if pts:
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            cx2 = (min(xs) + max(xs)) / 2
+            cy2 = (min(ys) + max(ys)) / 2
+            gk = (int(cx2 / GRID), int(cy2 / GRID))
+            if gk not in ct_grid:
+                ct_grid[gk] = (round(cx2, 1), round(cy2, 1))
+
+    snaps  = [{"x": v[0], "y": v[1], "t": "ep"} for v in list(ep_grid.values())[:max_snaps // 2]]
+    snaps += [{"x": v[0], "y": v[1], "t": "mp"} for v in list(mp_grid.values())[:max_snaps // 4]]
+    snaps += [{"x": v[0], "y": v[1], "t": "ct"} for v in list(ct_grid.values())[:max_snaps // 4]]
+
+    return snaps, lines_out[:max_lines]
+
+
+def _rotate_snaps(snaps, rot, W, H):
+    out = []
+    for s in snaps:
+        x, y = s["x"], s["y"]
+        if rot == 90:    x, y = y, W - x
+        elif rot == 180: x, y = W - x, H - y
+        elif rot == 270: x, y = H - y, x
+        out.append({"x": round(x,1), "y": round(y,1), "t": s["t"]})
+    return out
+
+
+def _rotate_lines(lines, rot, W, H):
+    out = []
+    for l in lines:
+        x0,y0,x1,y1 = l
+        if rot == 90:
+            x0,y0 = y0,W-x0;  x1,y1 = y1,W-x1
+        elif rot == 180:
+            x0,y0 = W-x0,H-y0; x1,y1 = W-x1,H-y1
+        elif rot == 270:
+            x0,y0 = H-y0,x0;  x1,y1 = H-y1,x1
+        out.append([round(x0,1),round(y0,1),round(x1,1),round(y1,1)])
+    return out
+
+
+# ══════════════════════════════════════════════════════
+# API
+# ══════════════════════════════════════════════════════
+@app.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    total = 0
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise ValueError("file too large")
+            tmp.write(chunk)
+        tmp.close()
+        if total == 0:
+            raise ValueError("empty upload")
+        try:
+            doc = fitz.open(tmp.name)
+        except Exception:
+            raise ValueError("invalid pdf")
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError("encrypted pdf")
+        case_id = _make_case(doc, tmp.name)
+        return {"pages": len(doc), "name": file.filename, "case_id": case_id,
+                "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024)}
+    except ValueError as exc:
+        tmp.close()
+        _cleanup_file(tmp.name)
+        msg = str(exc)
+        if msg == "file too large":
+            return JSONResponse({"error": "file too large"}, 413)
+        if msg == "empty upload":
+            return JSONResponse({"error": "empty file"}, 400)
+        if msg == "encrypted pdf":
+            return JSONResponse({"error": "encrypted pdf not supported"}, 400)
+        return JSONResponse({"error": "invalid pdf"}, 400)
+    except Exception:
+        tmp.close()
+        _cleanup_file(tmp.name)
+        return JSONResponse({"error": "upload failed"}, 500)
+
+
+@app.get("/page/{n}")
+def get_page(n: int, case_id: str, scale: float = 1.5, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    img_cache = case.setdefault("image_cache", {})
+    key = (n, scale, rot)
+    if key not in img_cache:
+        mat = fitz.Matrix(scale, scale).prerotate(rot)
+        pix = page.get_pixmap(matrix=mat)
+        img_cache[key] = pix.tobytes("jpeg", jpg_quality=88)
+    return Response(img_cache[key], media_type="image/jpeg")
+
+
+@app.get("/thumb/{n}")
+def get_thumb(n: int, case_id: str, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    mat = fitz.Matrix(0.18, 0.18).prerotate(rot)
+    pix = page.get_pixmap(matrix=mat)
+    return StreamingResponse(io.BytesIO(pix.tobytes("jpeg", jpg_quality=70)),
+                             media_type="image/jpeg")
+
+@app.get("/thumb-md/{n}")
+def get_thumb_md(n: int, case_id: str, rot: int = 0):
+    """Medium thumbnail for setup grid — 0.4x scale, quality 82"""
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    mat = fitz.Matrix(0.4, 0.4).prerotate(rot)
+    pix = page.get_pixmap(matrix=mat)
+    return StreamingResponse(io.BytesIO(pix.tobytes("jpeg", jpg_quality=82)),
+                             media_type="image/jpeg")
+
+
+@app.get("/analyse/{n}")
+def analyse(n: int, case_id: str, rot: int = 0):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    page = _require_page(doc, n)
+    if page is None: return JSONResponse({"error":"page out of range"}, 404)
+    cache = case.setdefault("page_cache", {})
+    key   = (n, rot)
+    if key in cache:
+        return Response(cache[key], media_type="application/json")
+
+    orig_W = page.rect.width
+    orig_H = page.rect.height
+
+    scale             = detect_scale(page)
+    snaps, lines      = extract_snaps_pdfium(case["path"], n - 1)
+    # fallback to PyMuPDF for scanned/raster PDFs that have no vector objects
+    if not snaps:
+        drawings = page.get_drawings()
+        snaps, lines = extract_snaps_typed(drawings)
+        snap_engine = "pymupdf" if (snaps or lines) else "none"
+    else:
+        snap_engine = "pdfium"
+    degraded_mode = "raster" if not snaps and not lines else "vector"
+    warning = None
+    if degraded_mode == "raster":
+        warning = "ไม่พบ vector geometry บนหน้านี้: วัดได้แบบ manual เท่านั้น ควรตรวจทานเพิ่ม"
+
+    W, H = orig_W, orig_H
+    if rot in (90, 180, 270):
+        snaps = _rotate_snaps(snaps, rot, W, H)
+        lines = _rotate_lines(lines, rot, W, H)
+        if rot in (90, 270): W, H = H, W
+
+    size = {
+        "w_pt": round(W,1),  "h_pt": round(H,1),
+        "w_mm": round(W/PT_PER_MM,1), "h_mm": round(H/PT_PER_MM,1),
+        "orig_w_pt": round(orig_W,1), "orig_h_pt": round(orig_H,1),
+    }
+    result = {"page":n, "size":size, "scale":scale,
+              "snaps":snaps, "lines":lines, "render_scale":1.5,
+              "snap_engine":snap_engine, "degraded_mode": degraded_mode,
+              "warning": warning}
+    # cache pre-serialized JSON bytes — avoids re-serializing on every request
+    result_bytes = json.dumps(result, separators=(",",":")).encode()
+    cache[key] = result_bytes
+    return Response(result_bytes, media_type="application/json")
+
+
+def _hex_to_rgb(h: str):
+    h = h.lstrip("#")
+    if len(h) != 6: return (1,1,0)
+    return tuple(int(h[i:i+2],16)/255 for i in (0,2,4))
+
+
+def _poly_area_pt2(pts: list[dict]) -> float:
+    if len(pts) < 3:
+        return 0.0
+    area = 0.0
+    for i, p1 in enumerate(pts):
+        p2 = pts[(i + 1) % len(pts)]
+        area += p1["x"] * p2["y"] - p2["x"] * p1["y"]
+    return abs(area) / 2.0
+
+
+@app.post("/export-pdf")
+async def export_pdf(body: dict):
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    doc = case.get("doc")
+    pages   = body.get("pages", [])
+    annots  = body.get("annotations", {})
+    rotations = body.get("rotations", {})
+    pdf_name  = body.get("pdfName", "export")
+
+    def _rot_pt(x, y, rot, W, H):
+        if rot == 0:   return x, y
+        if rot == 90:  return y, W - x
+        if rot == 180: return W - x, H - y
+        return H - y, x
+
+    new_doc = fitz.open()
+    for pg_num in pages:
+        idx = pg_num - 1
+        if idx < 0 or idx >= len(doc): continue
+        orig_page = doc[idx]
+        orig_W, orig_H = orig_page.rect.width, orig_page.rect.height
+        new_doc.insert_pdf(doc, from_page=idx, to_page=idx)
+        page = new_doc[len(new_doc)-1]
+        rot = int(rotations.get(str(pg_num), rotations.get(pg_num, 0)) or 0)
+        if rot in (90, 180, 270):
+            page.set_rotation(rot)
+        pg_annots = annots.get(str(pg_num), {})
+
+        for ln in pg_annots.get("lines", []):
+            try:
+                col = _hex_to_rgb(ln.get("color","#ffd60a"))
+                x0, y0 = _rot_pt(ln["x0"], ln["y0"], rot, orig_W, orig_H)
+                x1, y1 = _rot_pt(ln["x1"], ln["y1"], rot, orig_W, orig_H)
+                p1  = fitz.Point(x0, y0)
+                p2  = fitz.Point(x1, y1)
+                page.draw_line(p1, p2, color=col, width=1.5, dashes="[6 3]")
+                lbl = f"{ln['dist']:.2f} m" if ln.get("dist") else f"{ln['ptDist']:.1f} pt"
+                mx, my = _rot_pt((ln["x0"]+ln["x1"])/2, (ln["y0"]+ln["y1"])/2-5, rot, orig_W, orig_H)
+                page.insert_text(fitz.Point(mx, my), lbl, fontsize=7, color=col)
+            except Exception: pass
+
+        for poly in pg_annots.get("polys", []):
+            if not poly.get("closed"): continue
+            try:
+                col  = _hex_to_rgb(poly.get("color","#30d158"))
+                rpts = [_rot_pt(p["x"], p["y"], rot, orig_W, orig_H) for p in poly["pts"]]
+                pts  = [fitz.Point(x, y) for x, y in rpts]
+                page.draw_polyline(
+                    pts,
+                    color=col,
+                    fill=col,
+                    fill_opacity=0.08,
+                    width=1.5,
+                    closePath=True,
+                )
+                cx   = sum(x for x, _ in rpts) / len(rpts)
+                cy   = sum(y for _, y in rpts) / len(rpts)
+                rows = []
+                if poly.get("name"):  rows.append(poly["name"])
+                area = poly.get("area")
+                if area is None and poly.get("pts"):
+                    area_pt2 = _poly_area_pt2(poly["pts"])
+                    area = area_pt2 / (poly.get("scale_pts_per_m", 1) ** 2) if poly.get("scale_pts_per_m") else None
+                if area: rows.append(f"{area:.2f} sq.m")
+                for i, t in enumerate(rows):
+                    page.insert_text(fitz.Point(cx, cy+i*9-4), t, fontsize=7, color=col)
+            except Exception: pass
+
+    buf = io.BytesIO()
+    new_doc.save(buf)
+    new_doc.close()
+    safe = pdf_name.replace("/","_").replace("\\","_").replace(".pdf","")
+    return Response(buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_export.pdf"'})
+
+
+
+# ══════════════════════════════════════════════════════
+# Frontend
+# ══════════════════════════════════════════════════════
+@app.post("/project")
+async def save_project(body: dict):
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    case["page_tags"] = body.get("page_tags", {})
+    case["project_info"] = body.get("project_info", {})
+    return {"ok": True}
+
+@app.get("/project")
+def get_project(case_id: str):
+    case = _get_case(case_id)
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+    return {
+        "page_tags": case.get("page_tags", {}),
+        "project_info": case.get("project_info", {})
+    }
+
+
+@app.post("/export-xlsx")
+async def export_xlsx(body: dict):
+    if not HAS_XLSX:
+        return JSONResponse({"error": "xlsxwriter not installed"}, 501)
+    case = _get_case(body.get("case_id", ""))
+    if not case: return JSONResponse({"error":"invalid case"}, 400)
+
+    page_store   = body.get("pageStore", {})
+    page_tags    = body.get("pageTags", {})
+    page_names   = body.get("pageNames", {})
+    page_scales  = body.get("pageScales", {})
+    pdf_name     = body.get("pdfName", "export")
+
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
+
+    fmt_hdr = wb.add_format({"bold": True, "bg_color": "#1F4E79", "font_color": "white", "border": 1, "align": "center", "valign": "vcenter"})
+    fmt_sub = wb.add_format({"bg_color": "#D6E4F0", "bold": True, "border": 1, "align": "center"})
+    fmt_cell = wb.add_format({"border": 1, "valign": "top"})
+    fmt_num  = wb.add_format({"border": 1, "num_format": '#,##0.00'})
+    fmt_total = wb.add_format({"bold": True, "bg_color": "#E2EFDA", "border": 1, "num_format": '#,##0.00'})
+    fmt_deduct = wb.add_format({"bold": True, "bg_color": "#FCE4EC", "border": 1, "num_format": '#,##0.00', "font_color": "#C62828"})
+    fmt_net  = wb.add_format({"bold": True, "bg_color": "#C6EFCE", "border": 1, "num_format": '#,##0.00', "font_color": "#006100"})
+    fmt_note = wb.add_format({"font_color": "#666666", "italic": True, "border": 1})
+
+    ws = wb.add_worksheet("สรุปพื้นที่")
+    ws.set_column(0, 0, 18)
+    ws.set_column(1, 1, 28)
+    ws.set_column(2, 2, 14)
+    ws.set_column(3, 3, 14)
+    ws.set_column(4, 4, 14)
+    ws.set_column(5, 5, 14)
+    ws.set_column(6, 6, 40)
+
+    row = 0
+    ws.merge_range(row, 0, row, 6, f"สรุปพื้นที่ — {pdf_name}", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    row += 2
+
+    headers = ["หน้า / ชั้น", "ชื่อพื้นที่", "พื้นที่ (ตร.ม.)", "ไร่", "งาน", "ตารางวา", "หมายเหตุ"]
+    for c, h in enumerate(headers):
+        ws.write(row, c, h, fmt_hdr)
+    row += 1
+
+    grand_total = 0.0
+    grand_openings = 0.0
+
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str)
+        pg_data = page_store[pg_str]
+        tag = page_tags.get(pg_str, "")
+        pg_name = page_names.get(pg_str, f"หน้า {pg}")
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+
+        polys = pg_data.get("polys", [])
+        openings = pg_data.get("openings", [])
+
+        if not polys and not openings:
+            continue
+
+        ws.merge_range(row, 0, row, 6, pg_name, fmt_sub)
+        row += 1
+
+        pg_total = 0.0
+        pg_openings = 0.0
+
+        for poly in polys:
+            if not poly.get("closed"):
+                continue
+            area = poly.get("area", 0) or 0
+            if area <= 0 and poly.get("pts") and pts_per_m > 0:
+                area = _poly_area_pt2(poly["pts"]) / (pts_per_m ** 2)
+            name = poly.get("name", "")
+            area_type = poly.get("areaType", "room")
+            rwu = _m2_to_rwu(area) if area_type == "land" else ""
+            note = f"สเกล: {scale_info.get('label', '-')}" if isinstance(scale_info, dict) else ""
+            ws.write(row, 0, pg_name, fmt_cell)
+            ws.write(row, 1, name or f"พื้นที่ {poly.get('id', '')}", fmt_cell)
+            ws.write(row, 2, round(area, 2) if area else None, fmt_num)
+            if area_type == "land" and area > 0:
+                ws.write(row, 3, rwu[0] if rwu else None, fmt_num)
+                ws.write(row, 4, rwu[1] if rwu else None, fmt_num)
+                ws.write(row, 5, rwu[2] if rwu else None, fmt_num)
+            else:
+                ws.write(row, 3, "", fmt_cell)
+                ws.write(row, 4, "", fmt_cell)
+                ws.write(row, 5, "", fmt_cell)
+            ws.write(row, 6, note, fmt_note)
+            row += 1
+            if area > 0:
+                pg_total += area
+
+        for op in openings:
+            area = op.get("area", 0) or 0
+            name = op.get("name", "ช่องว่าง")
+            ws.write(row, 0, "", fmt_cell)
+            ws.write(row, 1, f"(-) {name}", fmt_cell)
+            ws.write(row, 2, -round(area, 2) if area else None, fmt_deduct)
+            ws.write(row, 3, "", fmt_cell)
+            ws.write(row, 4, "", fmt_cell)
+            ws.write(row, 5, "", fmt_cell)
+            ws.write(row, 6, op.get("note", "หักช่องว่าง"), fmt_note)
+            row += 1
+            if area > 0:
+                pg_openings += area
+
+        net = pg_total - pg_openings
+        ws.write(row, 0, "", fmt_cell)
+        ws.write(row, 1, "รวมสุทธิ", fmt_cell)
+        ws.write(row, 2, round(net, 2), fmt_net)
+        ws.write(row, 3, "", fmt_cell)
+        ws.write(row, 4, "", fmt_cell)
+        ws.write(row, 5, "", fmt_cell)
+        ws.write(row, 6, f"รวม {pg_total:.2f} − ช่องว่าง {pg_openings:.2f}", fmt_note)
+        row += 2
+
+        grand_total += pg_total
+        grand_openings += pg_openings
+
+    ws.merge_range(row, 0, row, 1, "รวมทั้งโปรเจกต์", fmt_hdr)
+    ws.write(row, 2, round(grand_total, 2), fmt_total)
+    ws.write(row, 3, "", fmt_cell)
+    ws.write(row, 4, "", fmt_cell)
+    ws.write(row, 5, "", fmt_cell)
+    ws.write(row, 6, f"รวม {grand_total:.2f} − ช่องว่าง {grand_openings:.2f} = สุทธิ {grand_total - grand_openings:.2f} ตร.ม.", fmt_note)
+    row += 2
+
+    ws2 = wb.add_worksheet("ความยาวเส้น Polygon")
+    ws2.set_column(0, 0, 18)
+    ws2.set_column(1, 1, 28)
+    ws2.set_column(2, 2, 14)
+    ws2.set_column(3, 3, 14)
+    ws2.set_column(4, 4, 40)
+
+    r2 = 0
+    ws2.merge_range(r2, 0, r2, 4, "ความยาวเส้นทุกด้านของ Polygon", wb.add_format({"bold": True, "font_size": 14, "bg_color": "#1F4E79", "font_color": "white", "align": "center"}))
+    r2 += 2
+    for c, h in enumerate(["หน้า / ชั้น", "ชื่อพื้นที่", "ด้านที่", "ความยาว (ม.)", "หมายเหตุ"]):
+        ws2.write(r2, c, h, fmt_hdr)
+    r2 += 1
+
+    for pg_str in sorted(page_store.keys(), key=lambda x: int(x)):
+        pg = int(pg_str)
+        pg_data = page_store[pg_str]
+        pg_name = page_names.get(pg_str, f"หน้า {pg}")
+        scale_info = page_scales.get(pg_str, {})
+        pts_per_m = scale_info.get("pts_per_m", 0) if isinstance(scale_info, dict) else 0
+        if pts_per_m <= 0:
+            continue
+
+        for poly in pg_data.get("polys", []):
+            if not poly.get("closed") or not poly.get("pts"):
+                continue
+            name = poly.get("name", f"พื้นที่ {poly.get('id', '')}")
+            pts = poly["pts"]
+            for i in range(len(pts)):
+                p1 = pts[i]
+                p2 = pts[(i + 1) % len(pts)]
+                dist_pt = math.hypot(p2["x"] - p1["x"], p2["y"] - p1["y"])
+                dist_m = dist_pt / pts_per_m
+                ws2.write(r2, 0, pg_name, fmt_cell)
+                ws2.write(r2, 1, name, fmt_cell)
+                ws2.write(r2, 2, f"ด้าน {i+1}", fmt_cell)
+                ws2.write(r2, 3, round(dist_m, 2), fmt_num)
+                ws2.write(r2, 4, f"{dist_pt:.1f} pt", fmt_note)
+                r2 += 1
+
+    wb.close()
+    buf.seek(0)
+    safe = pdf_name.replace("/", "_").replace("\\", "_").replace(".pdf", "")
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_report.xlsx"'})
+
+
+def _m2_to_rwu(m2):
+    if m2 <= 0:
+        return (0, 0, 0)
+    rai = int(m2 // 1600)
+    rem = m2 % 1600
+    ngan = int(rem // 400)
+    sqwa = round((rem % 400) / 4, 2)
+    return (rai, ngan, sqwa)
+
+
+HTML = r"""<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF Scale</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#1c1c1e;color:#e5e5e7;
+     height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#topbar{background:#2c2c2e;padding:6px 12px;display:flex;align-items:center;
+        gap:6px;border-bottom:1px solid #3a3a3c;flex-shrink:0;flex-wrap:wrap}
+#topbar h1{font-size:13px;font-weight:700;white-space:nowrap}
+#upload-btn{background:#0a84ff;color:#fff;border:none;border-radius:7px;
+            padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer}
+#upload-btn:hover{background:#0071e3}
+#file-input{display:none}
+.sep{width:1px;height:22px;background:#3a3a3c;flex-shrink:0}
+.tb-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+        color:#e5e5e7;border-radius:7px;padding:4px 10px;font-size:12px;
+        cursor:pointer;white-space:nowrap}
+.tb-btn:hover{background:rgba(255,255,255,.14)}
+.tb-btn.active{background:#0a84ff;border-color:#0a84ff;color:#fff}
+.tb-btn.danger{background:rgba(255,59,48,.15);border-color:rgba(255,59,48,.3);color:#ff453a}
+.tb-btn.danger:hover{background:rgba(255,59,48,.28)}
+/* snap toggles */
+#snap-bar{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
+#snap-bar span{font-size:11px;color:#636366;margin-right:2px}
+#snap-radius-wrap{display:flex;align-items:center;gap:4px;margin-left:6px;border-left:1px solid rgba(255,255,255,.1);padding-left:8px}
+#snap-radius-wrap label{font-size:10px;color:#636366;white-space:nowrap}
+#snap-radius-slider{width:72px;accent-color:#0a84ff;cursor:pointer}
+#snap-radius-val{font-size:11px;font-weight:600;color:#0a84ff;min-width:20px;text-align:right}
+.sn-btn{border:1px solid rgba(255,255,255,.12);border-radius:20px;
+        padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;
+        background:rgba(255,255,255,.05);color:#636366;transition:all .15s}
+.sn-btn:hover{background:rgba(255,255,255,.1)}
+.sn-btn.on{color:#fff}
+.sn-ep.on{background:#ffd60a33;border-color:#ffd60a;color:#ffd60a}
+.sn-mp.on{background:#ff950033;border-color:#ff9500;color:#ff9500}
+.sn-ct.on{background:#0a84ff33;border-color:#0a84ff;color:#0a84ff}
+.sn-nl.on{background:#30d15833;border-color:#30d158;color:#30d158}
+.sn-ix.on{background:#ff453a33;border-color:#ff453a;color:#ff453a}
+.sn-off.on{background:#48484a;border-color:#636366;color:#e5e5e7}
+#scale-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;
+             background:rgba(255,69,58,.2);color:#ff453a;border:1px solid rgba(255,69,58,.3)}
+#scale-badge.ok{background:rgba(48,209,88,.15);color:#30d158;border-color:rgba(48,209,88,.3)}
+#scale-badge.warn{background:rgba(255,159,10,.15);color:#ff9f0a;border-color:rgba(255,159,10,.35)}
+#scale-badge.manual{background:rgba(10,132,255,.15);color:#5ac8fa;border-color:rgba(10,132,255,.35)}
+#status{font-size:11px;color:#98989f;overflow:hidden;text-overflow:ellipsis;
+        max-width:240px;white-space:nowrap}
+#body{display:flex;flex:1;overflow:hidden}
+#thumb-strip{width:130px;min-width:130px;background:#2c2c2e;
+             border-right:1px solid #3a3a3c;overflow-y:auto;flex-shrink:0}
+#thumb-strip::-webkit-scrollbar{width:4px}
+#thumb-strip::-webkit-scrollbar-thumb{background:#48484a;border-radius:2px}
+.thumb-item{padding:6px;cursor:pointer;border-bottom:1px solid #3a3a3c;
+            display:flex;flex-direction:column;align-items:center;gap:3px}
+.thumb-item:hover{background:rgba(255,255,255,.06)}
+.thumb-item.active{background:rgba(10,132,255,.2);border-left:3px solid #0a84ff}
+.thumb-item img{width:100%;border-radius:3px;background:#333}
+.thumb-item span{font-size:10px;color:#98989f}
+.thumb-item.active span{color:#e5e5e7}
+.thumb-scale{font-size:9px;color:#30d158;font-weight:600}
+.thumb-scale.none{color:#ff453a}
+.thumb-dot{font-size:9px;color:#0a84ff}
+#workspace{flex:1;overflow:hidden;position:relative;background:#111;cursor:grab}
+#workspace.drawing{cursor:crosshair}
+#cc{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+canvas{display:block}
+#infobar{background:#2c2c2e;border-top:1px solid #3a3a3c;padding:5px 14px;
+         font-size:11px;display:flex;gap:16px;align-items:center;flex-shrink:0}
+#infobar span{color:#98989f}#infobar b{color:#e5e5e7}
+#page-summary{color:#5ac8fa;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#measure-result{color:#ffd60a;font-weight:600;margin-left:auto}
+#btn-perp.active,#btn-opening.active{background:#bf5af2;border-color:#bf5af2;color:#fff}
+/* snap cursor */
+#snap-cur{position:fixed;width:14px;height:14px;border:2px solid #ffd60a;
+          border-radius:50%;transform:translate(-50%,-50%);
+          pointer-events:none;display:none;z-index:200;
+          box-shadow:0 0 6px rgba(255,214,10,.5);transition:border-color .1s}
+#snap-lbl{position:fixed;font-size:9px;font-weight:700;
+          pointer-events:none;display:none;z-index:201;
+          background:rgba(0,0,0,.7);padding:1px 4px;border-radius:3px}
+/* panels */
+.panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+       background:#2c2c2e;border:1px solid #48484a;border-radius:12px;
+       padding:20px 24px;z-index:500;display:none;min-width:280px;
+       box-shadow:0 8px 32px rgba(0,0,0,.6)}
+.panel h3{font-size:13px;margin-bottom:12px}
+.panel label{font-size:12px;color:#98989f;display:block;margin-bottom:6px}
+.panel-input{width:100%;background:#1c1c1e;border:1px solid #48484a;border-radius:7px;
+             color:#e5e5e7;font-size:14px;padding:7px 10px;outline:none;margin-bottom:14px}
+.panel-input:focus{border-color:#0a84ff}
+.panel-row{display:flex;gap:8px}
+.btn-ok{flex:1;background:#0a84ff;color:#fff;border:none;border-radius:7px;
+        padding:7px;font-size:12px;font-weight:600;cursor:pointer}
+.btn-ok:hover{background:#0071e3}
+.btn-cancel{background:rgba(255,255,255,.08);color:#e5e5e7;
+            border:1px solid rgba(255,255,255,.1);border-radius:7px;
+            padding:7px 14px;font-size:12px;cursor:pointer}
+/* context menu */
+#ctx-menu{position:fixed;background:#2c2c2e;border:1px solid #48484a;
+          border-radius:9px;z-index:600;display:none;min-width:180px;
+          box-shadow:0 4px 20px rgba(0,0,0,.6);overflow:hidden}
+.ctx-item{padding:9px 14px;font-size:12px;cursor:pointer;color:#e5e5e7}
+.ctx-item:hover{background:rgba(255,255,255,.1)}
+.ctx-item.del{color:#ff453a}
+.ctx-sep{height:1px;background:#3a3a3c}
+.ctx-color-row{padding:7px 14px;display:flex;align-items:center;gap:6px}
+.ctx-color-row span{font-size:11px;color:#98989f;white-space:nowrap}
+#ctx-inp-color{width:26px;height:22px;border:none;padding:0;cursor:pointer;
+               border-radius:4px;background:none;flex-shrink:0}
+#ctx-inp-opacity{width:56px;accent-color:#0a84ff;cursor:pointer}
+#ctx-opacity-val{font-size:11px;color:#e5e5e7;min-width:28px}
+/* inline color controls */
+#color-bar{display:flex;align-items:center;gap:6px}
+#color-bar span{font-size:11px;color:#636366;white-space:nowrap}
+#inp-color{width:28px;height:26px;border:none;padding:0;cursor:pointer;
+           border-radius:5px;background:none;overflow:hidden;flex-shrink:0}
+#inp-opacity{width:64px;accent-color:#0a84ff;cursor:pointer}
+#opacity-val{font-size:11px;color:#e5e5e7;min-width:28px}
+/* zoom controls */
+#zoom-bar{display:flex;align-items:center;gap:4px}
+#zoom-val{font-size:11px;color:#e5e5e7;min-width:36px;text-align:center}
+/* area type in name panel */
+.atype-row{display:flex;gap:8px;margin-bottom:14px}
+.atype-btn{flex:1;padding:6px 4px;font-size:12px;font-weight:600;cursor:pointer;
+           border-radius:7px;border:1px solid rgba(255,255,255,.1);
+           background:rgba(255,255,255,.05);color:#98989f;text-align:center}
+.atype-btn.sel{background:rgba(10,132,255,.18);border-color:#0a84ff;color:#0a84ff}
+/* page manager modal */
+#pgmgr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:700;display:none;
+               align-items:center;justify-content:center}
+#pgmgr-overlay.open{display:flex}
+#pgmgr-box{background:#2c2c2e;border:1px solid #48484a;border-radius:14px;
+           padding:20px;width:min(90vw,820px);max-height:85vh;display:flex;
+           flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#pgmgr-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#pgmgr-header h3{font-size:13px;font-weight:700;flex:1}
+#pgmgr-sel-info{font-size:11px;color:#98989f;min-width:80px}
+.pgmgr-hbtn{padding:5px 12px;font-size:11px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e5e5e7}
+.pgmgr-hbtn:hover{background:rgba(255,255,255,.13)}
+.pgmgr-hbtn.primary{background:#0a84ff;border-color:#0a84ff;color:#fff}
+.pgmgr-hbtn.primary:hover{background:#0071e3}
+.pgmgr-hbtn.danger{color:#ff453a;border-color:rgba(255,69,58,.3)}
+#pgmgr-grid{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;padding:4px 2px;flex:1}
+.pgmgr-cell{width:90px;cursor:pointer;border-radius:8px;border:2px solid transparent;
+            padding:4px;display:flex;flex-direction:column;align-items:center;gap:3px;
+            background:rgba(255,255,255,.04);transition:border-color .15s,background .15s;
+            user-select:none}
+.pgmgr-cell:hover{background:rgba(255,255,255,.08)}
+.pgmgr-cell.sel{border-color:#0a84ff;background:rgba(10,132,255,.15)}
+.pgmgr-cell img{width:100%;border-radius:4px;background:#333;pointer-events:none}
+.pgmgr-cell span{font-size:10px;color:#98989f}
+.pgmgr-cell.sel span{color:#e5e5e7}
+.pgmgr-footer{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #3a3a3c}
+/* ── setup overlay ── */
+#setup-overlay{position:fixed;inset:0;background:#1c1c1e;z-index:500;display:none;flex-direction:column}
+#setup-overlay.open{display:flex}
+#setup-hdr{background:#2c2c2e;padding:10px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #3a3a3c;flex-shrink:0}
+#setup-hdr h2{font-size:14px;font-weight:700;flex:1}
+#setup-hdr .pdf-name{font-size:11px;color:#98989f;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#setup-start-btn{background:#30d158;color:#000;border:none;border-radius:8px;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer}
+#setup-start-btn:hover{background:#25a244}
+#setup-body{display:flex;flex:1;overflow:hidden}
+#proj-form-panel{width:260px;min-width:260px;background:#2c2c2e;border-right:1px solid #3a3a3c;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+#proj-form-panel h3{font-size:12px;font-weight:700;color:#98989f;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.pf-row{display:flex;flex-direction:column;gap:4px}
+.pf-row label{font-size:11px;color:#98989f}
+.pf-row input,.pf-row select{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;color:#e5e5e7;padding:5px 8px;font-size:12px;width:100%}
+.pf-row select option{background:#1c1c1e}
+#tag-grid-wrap{flex:1;overflow-y:auto;padding:12px}
+#tag-grid-wrap h3{font-size:12px;font-weight:700;color:#98989f;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+#tag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.tag-cell{background:#2c2c2e;border:1px solid #3a3a3c;border-radius:8px;padding:6px;display:flex;flex-direction:column;align-items:center;gap:5px}
+.tag-cell img{width:100%;border-radius:4px;background:#333;aspect-ratio:1.414;object-fit:contain}
+.tag-cell .tc-lbl{font-size:10px;color:#98989f}
+.tag-cell select{width:100%;background:#1c1c1e;border:1px solid #3a3a3c;border-radius:5px;color:#e5e5e7;padding:3px 5px;font-size:10px}
+.tag-badge.site{background:#0a84ff33;color:#0a84ff;border:1px solid #0a84ff55}
+.tag-badge.plan{background:#30d15833;color:#30d158;border:1px solid #30d15855}
+.tag-badge.elev{background:#ff950033;color:#ff9500;border:1px solid #ff950055}
+.tag-badge.detail{background:#bf5af233;color:#bf5af2;border:1px solid #bf5af255}
+.thumb-tag{font-size:9px;font-weight:600;padding:1px 4px;border-radius:8px;margin-top:1px}
+.tag-cell.excluded{opacity:0.35;filter:grayscale(1)}
+.tag-cell.excluded .tc-lbl{text-decoration:line-through;color:#ff453a}
+.tc-del-btn{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;
+  border:none;background:rgba(255,59,48,.18);color:#ff453a;font-size:11px;line-height:18px;
+  text-align:center;cursor:pointer;padding:0;transition:background .15s}
+.tc-del-btn:hover{background:rgba(255,59,48,.4)}
+.tc-del-btn.on{background:#ff3b30;color:#fff}
+.tag-cell{position:relative}
+.thumb-item.excluded{display:none}
+.thumb-item.excluded span{text-decoration:line-through}
+/* ── check panel ── */
+#check-panel{position:fixed;top:48px;right:0;bottom:0;width:480px;background:#1c1c1e;
+  border-left:1px solid #3a3a3c;display:none;flex-direction:column;z-index:200;overflow-y:auto}
+#check-panel.open{display:flex}
+#check-hdr{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #3a3a3c;gap:8px}
+#check-hdr h3{margin:0;flex:1;font-size:14px;color:#e5e5e7}
+#check-hdr button{background:transparent;border:none;color:#98989f;font-size:16px;cursor:pointer;padding:4px 8px}
+#check-hdr button:hover{color:#e5e5e7}
+#check-body{flex:1;overflow-y:auto;padding-bottom:24px}
+.check-summary{display:flex;gap:16px;padding:12px 16px;border-bottom:1px solid #2c2c2e;font-size:13px}
+.cs-pass{color:#30d158;font-weight:600}.cs-fail{color:#ff453a;font-weight:600}.cs-unk{color:#98989f}
+.check-table{width:100%;border-collapse:collapse;font-size:12px}
+.check-table th{background:#2c2c2e;padding:6px 8px;text-align:left;color:#98989f;font-weight:500}
+.check-table td{padding:7px 8px;border-bottom:1px solid #2c2c2e;vertical-align:top;color:#e5e5e7}
+.check-table tr.fail td{background:#2a1a1a}.check-table tr.pass td{background:#1a2a1a}
+.check-table tr.unk td{background:#1c1c1e}
+.check-table td small{color:#98989f;font-size:11px}
+.result-icon{text-align:center;font-size:15px;width:28px}
+.check-data{padding:12px 16px;border-top:1px solid #3a3a3c}
+.check-data h4{font-size:11px;color:#636366;text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px}
+.cd-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;
+  border-bottom:1px solid #2c2c2e;color:#e5e5e7}
+.cd-row span:first-child{color:#98989f}
+.cd-warn{background:#2a2200;border-radius:6px;padding:8px 12px;margin:12px 16px;
+  font-size:12px;color:#ffd60a}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <h1>📐 PDF Scale</h1>
+  <label id="upload-btn">📂 เปิด PDF<input id="file-input" type="file" accept=".pdf"></label>
+  <button class="tb-btn" id="btn-setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')" title="ตั้งค่าโปรเจกต์">⚙ Setup</button>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-prev" onclick="const p=getPrevPage(curPage);if(p)loadPage(p)" title="หน้าก่อน (←)">◀</button>
+  <span id="page-lbl" style="font-size:11px;color:#e5e5e7;min-width:48px;text-align:center">— / —</span>
+  <button class="tb-btn" id="btn-next" onclick="const n=getNextPage(curPage);if(n)loadPage(n)" title="หน้าถัดไป (→)">▶</button>
+  <div class="sep"></div>
+  <button class="tb-btn active" id="btn-pan"   onclick="setMode('pan')">✋ Pan</button>
+  <button class="tb-btn"        id="btn-sel"   onclick="setMode('sel')">↖ เลือก</button>
+  <button class="tb-btn"        id="btn-dist"  onclick="setMode('dist')">📏 ระยะ</button>
+  <button class="tb-btn"        id="btn-area"  onclick="setMode('area')">⬡ พื้นที่</button>
+  <button class="tb-btn"        id="btn-calib" onclick="setMode('calib')">📐 สอบเทียบ</button>
+  <button class="tb-btn danger" onclick="clearMeasures()">🗑</button>
+  <div class="sep"></div>
+  <div id="color-bar">
+    <span>สี</span>
+    <input type="color" id="inp-color" value="#30d158" oninput="applyColor(this.value)" title="สี">
+    <input type="range" id="inp-opacity" min="10" max="100" value="85" oninput="applyOpacity(+this.value)" title="ความโปร่ง">
+    <span id="opacity-val">85%</span>
+  </div>
+  <div class="sep"></div>
+  <div id="zoom-bar">
+    <button class="tb-btn" onclick="adjustZoom(1.3)" title="ซูมเข้า">+</button>
+    <span id="zoom-val">100%</span>
+    <button class="tb-btn" onclick="adjustZoom(1/1.3)" title="ซูมออก">−</button>
+    <button class="tb-btn" onclick="fitToWindow()" title="Fit">⊞</button>
+  </div>
+  <div class="sep"></div>
+  <button class="tb-btn" onclick="rotatePage(-90)">↺</button>
+  <button class="tb-btn" onclick="rotatePage(90)">↻</button>
+  <span id="rot-badge" style="font-size:11px;color:#98989f;display:none"></span>
+  <div class="sep"></div>
+  <div id="snap-bar">
+    <span>Snap:</span>
+    <button class="sn-btn sn-ep on"  id="sn-ep"  onclick="toggleSnap('ep')">EP</button>
+    <button class="sn-btn sn-mp on"  id="sn-mp"  onclick="toggleSnap('mp')">MP</button>
+    <button class="sn-btn sn-ct on"  id="sn-ct"  onclick="toggleSnap('ct')">CT</button>
+    <button class="sn-btn sn-nl"     id="sn-nl"  onclick="toggleSnap('nl')">NL</button>
+    <button class="sn-btn sn-ix"     id="sn-ix"  onclick="toggleSnap('ix')">IX</button>
+    <button class="sn-btn sn-off"    id="sn-off" onclick="toggleSnap('off')">—</button>
+    <div id="snap-radius-wrap">
+      <label>ระยะ</label>
+      <input type="range" id="snap-radius-slider" min="8" max="60" value="20" step="1"
+             oninput="snapRadius=+this.value;closeRadius=Math.round(snapRadius*0.9);document.getElementById('snap-radius-val').textContent=this.value">
+      <span id="snap-radius-val">20</span><span style="font-size:10px;color:#636366">px</span>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <span id="scale-badge">ยังไม่มีไฟล์</span>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-perp" onclick="togglePerp()" title="วัดตั้งฉาก">⊥ ตั้งฉาก</button>
+  <button class="tb-btn" id="btn-opening" onclick="toggleOpening()" title="วัดช่องว่าง">🕳 ช่องว่าง</button>
+  <div class="sep"></div>
+  <button class="tb-btn" style="background:#1a3a1a;color:#30d158;font-weight:600" onclick="openCheckPanel()">🔍 ตรวจ</button>
+  <div class="sep"></div>
+  <button class="tb-btn" onclick="exportCSV()">⬇ CSV</button>
+  <button class="tb-btn" onclick="exportJSON()">⬇ JSON</button>
+  <button class="tb-btn" onclick="exportXLSX()">⬇ XLSX</button>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-undo" onclick="undo()" title="Undo (Ctrl+Z)">↩ Undo</button>
+  <button class="tb-btn" onclick="openPageManager()" title="จัดการหน้า / บันทึก PDF">📄 หน้า</button>
+  <button class="tb-btn" onclick="saveProject()" title="บันทึกโปรเจกต์ (.bmaplan)">💾 บันทึก</button>
+  <label class="tb-btn" style="cursor:pointer" title="โหลดโปรเจกต์ (.bmaplan)">📂 โหลด<input id="proj-input" type="file" accept=".bmaplan" style="display:none"></label>
+  <span id="status" style="margin-left:4px"></span>
+</div>
+<div id="check-panel">
+  <div id="check-hdr">
+    <h3>🔍 ผลตรวจสอบ</h3>
+    <button onclick="openSetup()" title="แก้ไขข้อมูลโปรเจกต์">⚙ Setup</button>
+    <button onclick="openCheckPanel()" title="คำนวณใหม่">↻ รีเฟรช</button>
+    <button onclick="closeCheckPanel()" title="ปิด">✕</button>
+  </div>
+  <div id="check-body"><p style="padding:16px;color:#636366">กด ตรวจ เพื่อเริ่มคำนวณ</p></div>
+</div>
+<div id="setup-overlay">
+  <div id="setup-hdr">
+    <h2>📋 ตั้งค่าโปรเจกต์</h2>
+    <span class="pdf-name" id="setup-pdf-name"></span>
+    <button class="tb-btn" style="font-size:12px" onclick="saveProject()">💾 บันทึก</button>
+    <button id="setup-start-btn" onclick="startCheck()">เริ่มตรวจ ▶</button>
+  </div>
+  <div id="setup-body">
+    <div id="proj-form-panel">
+      <h3>ข้อมูลเคส</h3>
+      <div class="pf-row"><label>เลขที่คำขอ</label><input id="pi-reqno" placeholder="เช่น อ.1-2568-001"></div>
+      <div class="pf-row"><label>โซนผังเมือง กทม. 2556</label>
+        <select id="pi-zone">
+          <option value="">-- เลือกโซน --</option>
+          <option value="ย.1">ย.1 — พักอาศัยหนาแน่นน้อยมาก</option>
+          <option value="ย.2">ย.2 — พักอาศัยหนาแน่นน้อย</option>
+          <option value="ย.3">ย.3 — พักอาศัยหนาแน่นปานกลาง</option>
+          <option value="ย.4">ย.4 — พักอาศัยหนาแน่นมาก</option>
+          <option value="พ.1">พ.1 — พาณิชยกรรม (ย่านชุมชน)</option>
+          <option value="พ.2">พ.2 — พาณิชยกรรม (ย่านหลัก)</option>
+          <option value="พ.3">พ.3 — พาณิชยกรรม (ศูนย์กลาง)</option>
+          <option value="อ.1">อ.1 — อุตสาหกรรม (เบา)</option>
+          <option value="อ.2">อ.2 — อุตสาหกรรม (หนัก)</option>
+          <option value="ก.1">ก.1 — สถาบันราชการ</option>
+          <option value="ก.2">ก.2 — สถาบันราชการ (หลัก)</option>
+        </select>
+      </div>
+      <div class="pf-row"><label>ประเภทอาคาร</label>
+        <select id="pi-btype">
+          <option value="">-- เลือกประเภท --</option>
+          <option value="house">บ้านเดี่ยว</option>
+          <option value="townhouse">ทาวน์เฮาส์ / ห้องแถว</option>
+          <option value="condo">อาคารชุด / คอนโดมิเนียม</option>
+          <option value="apartment">อาคารอยู่อาศัยรวม / Apartment</option>
+          <option value="office">สำนักงาน</option>
+          <option value="retail">พาณิชย์ / ห้างสรรพสินค้า</option>
+          <option value="hotel">โรงแรม</option>
+          <option value="mixed">อาคารรวม (Mixed-use)</option>
+        </select>
+      </div>
+      <div class="pf-row"><label>ลักษณะงาน</label>
+        <select id="pi-worktype">
+          <option value="new">ก่อสร้างใหม่</option>
+          <option value="modify">ดัดแปลง</option>
+          <option value="demolish">รื้อถอน</option>
+          <option value="move">เคลื่อนย้าย</option>
+        </select>
+      </div>
+      <h3 style="margin-top:4px">อาคาร</h3>
+      <div class="pf-row"><label>ความสูงอาคาร (ม.)</label><input id="pi-height" type="number" min="0" step="0.5" placeholder="เช่น 15"></div>
+      <div class="pf-row"><label>จำนวนชั้น</label><input id="pi-floors" type="number" min="1" step="1" placeholder="เช่น 4"></div>
+      <div class="pf-row"><label>GFA รวมทุกชั้น (ตร.ม.) <span style="color:#636366;font-size:9px">ประมาณการ</span></label><input id="pi-gfa" type="number" min="0" step="1" placeholder="เช่น 800"></div>
+      <div class="pf-row"><label>จำนวนหน่วย/ห้อง <span style="color:#636366;font-size:9px">สำหรับนับที่จอดรถ</span></label><input id="pi-units" type="number" min="0" step="1" placeholder="เช่น 20"></div>
+      <h3 style="margin-top:4px">ถนน (ม.)</h3>
+      <div class="pf-row"><label>ด้านหน้า</label><input id="pi-road" type="number" min="0" step="0.5" placeholder="เช่น 8"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div class="pf-row"><label>ด้านซ้าย</label><input id="pi-road-l" type="number" min="0" step="0.5" placeholder="0 = ไม่มี"></div>
+        <div class="pf-row"><label>ด้านขวา</label><input id="pi-road-r" type="number" min="0" step="0.5" placeholder="0 = ไม่มี"></div>
+      </div>
+      <div class="pf-row"><label>ด้านหลัง</label><input id="pi-road-b" type="number" min="0" step="0.5" placeholder="0 = ไม่มี"></div>
+    </div>
+    <div id="tag-grid-wrap">
+      <h3>Tag หน้า PDF</h3>
+      <div id="tag-grid"></div>
+    </div>
+  </div>
+</div>
+<div id="body">
+  <div id="thumb-strip"></div>
+  <div id="workspace">
+    <div id="cc"><canvas id="canvas"></canvas></div>
+  </div>
+</div>
+<div id="infobar">
+  <span>Mode: <b id="lbl-mode">Pan</b></span>
+  <span>Scale: <b id="lbl-scale">—</b></span>
+  <span>Snap: <b id="lbl-snaps">—</b></span>
+  <span id="page-summary">ยังไม่มีรายการพื้นที่</span>
+  <span id="measure-result"></span>
+</div>
+<div id="snap-cur"></div>
+<div id="snap-lbl"></div>
+
+<div id="calib-panel" class="panel">
+  <h3>📐 สอบเทียบสเกล</h3>
+  <div id="calib-line-info" style="font-size:11px;color:#98989f;margin-bottom:14px">คลิก 2 จุด บนเส้นที่ทราบระยะจริง</div>
+  <label>ระยะจริงระหว่าง 2 จุด (เมตร)</label>
+  <input id="calib-input" class="panel-input" type="number" step="0.01" min="0.01" placeholder="เช่น 7.71">
+  <div class="panel-row">
+    <button class="btn-ok" onclick="finishCalib()">ยืนยัน</button>
+    <button class="btn-cancel" onclick="cancelCalib()">ยกเลิก</button>
+  </div>
+</div>
+
+<div id="name-panel" class="panel">
+  <h3 id="name-panel-title">ชื่อพื้นที่</h3>
+  <div class="atype-row" id="atype-row" style="display:none">
+    <button class="atype-btn sel" id="atype-room" onclick="setAType('room')">🏠 ห้อง/อาคาร</button>
+    <button class="atype-btn"    id="atype-land" onclick="setAType('land')">🌿 ที่ดิน</button>
+  </div>
+  <label>ชื่อพื้นที่ / ห้อง</label>
+  <input id="name-input" class="panel-input" type="text" placeholder="เช่น ห้องนอน 1">
+  <div class="panel-row">
+    <button class="btn-ok" onclick="finishName()">ตกลง</button>
+    <button class="btn-cancel" onclick="cancelName()">ข้าม</button>
+  </div>
+</div>
+
+<div id="ctx-menu">
+  <div class="ctx-color-row">
+    <span>สี</span>
+    <input type="color" id="ctx-inp-color" oninput="ctxColor(this.value)" title="เปลี่ยนสี">
+    <input type="range" id="ctx-inp-opacity" min="10" max="100" value="85" oninput="ctxOpacity(+this.value)" title="ความโปร่ง">
+    <span id="ctx-opacity-val">85%</span>
+  </div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-rename" onclick="ctxRename()">✏️ เปลี่ยนชื่อ</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item del" onclick="ctxDelete()">🗑 ลบ</div>
+</div>
+
+<!-- page manager overlay -->
+<div id="pgmgr-overlay" onclick="if(event.target===this)closePgMgr()">
+  <div id="pgmgr-box" onclick="event.stopPropagation()">
+    <div id="pgmgr-header">
+      <h3>📄 จัดการหน้า</h3>
+      <span id="pgmgr-sel-info">เลือก 0 หน้า</span>
+      <button class="pgmgr-hbtn" onclick="pgmgrSelectAll()">เลือกทั้งหมด</button>
+      <button class="pgmgr-hbtn" onclick="pgmgrClearAll()">ยกเลิก</button>
+      <button class="pgmgr-hbtn danger" onclick="closePgMgr()">✕</button>
+    </div>
+    <div id="pgmgr-grid"></div>
+    <div class="pgmgr-footer">
+      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(false)">⬇ Save PDF (หน้าที่เลือก)</button>
+      <button class="pgmgr-hbtn primary" onclick="pgmgrExportPDF(true)">⬇ PDF + annotations</button>
+      <button class="pgmgr-hbtn" onclick="saveProject()">💾 บันทึกโปรเจกต์</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── state ──────────────────────────────────────────────
+let totalPages=0, curPage=1, pageData=null;
+const RS=1.5;
+let zoom=1, panX=0, panY=0, mode="pan";
+let mPts=[];           // in-progress — PDF pt (unrotated)
+let mLines=[], mPolys=[];
+let isPan=false, lastMx=0, lastMy=0;
+let bgImg=null, snapTarget=null, snapTargetType=null;
+let calibPts=[];       // canvas px
+let pageRotations={};
+let pageStore={};      // {page: {lines,polys,openings,calibScale}}
+let pageTags={};        // {page: tag string}
+let pageNames={};       // {page: custom name e.g. "ชั้น 1"}
+let projectInfo={};     // {reqNo, zone, buildingType, workType, roadWidth, roadLeft, roadRight, roadBack, buildingHeight, floors, gfa, units}
+const TAG_OPTIONS=[
+  {value:"",      label:"— ไม่ระบุ —",  cls:""},
+  {value:"site",  label:"ผังบริเวณ",     cls:"site"},
+  {value:"plan",  label:"แปลนพื้น",      cls:"plan"},
+  {value:"elev",  label:"รูปด้าน/ตัด",  cls:"elev"},
+  {value:"detail",label:"รายละเอียด",    cls:"detail"},
+];
+const ZONE_RULES={
+  "ย.1":{far:1.0,osr:30},"ย.2":{far:2.0,osr:20},"ย.3":{far:2.5,osr:15},
+  "ย.4":{far:4.0,osr:10},"พ.1":{far:4.0,osr:10},"พ.2":{far:6.0,osr:10},
+  "พ.3":{far:7.0,osr:5}, "อ.1":{far:2.0,osr:10},"อ.2":{far:2.5,osr:10},
+  "ก.1":{far:3.5,osr:15},"ก.2":{far:3.5,osr:10},
+};
+let analyseCache={};
+let nameCb=null;
+let ctxTarget=null;
+let snapModes={ep:true,mp:true,ct:true,nl:false,ix:false,off:false};
+let snapRadius=20;   // px — ปรับได้จาก slider
+let closeRadius=18;  // px — radius สำหรับปิด polygon (auto = 90% ของ snapRadius)
+let curColor="#30d158", curOpacity=0.85, curAType="room";
+let selItem=null;    // {type:'line'|'poly', idx}
+let dragState=null;  // {type, idx, startPdf, origData}
+let undoStack=[];
+let spaceDown=false, preSpaceMode="pan";
+let currentFileName="";
+let pgmgrSel=new Set();   // selected page numbers in page manager
+let pgmgrLastClick=null;
+let docVersion=0;
+let pageLoadSeq=0;
+let analyseSeq=0;
+let currentCaseId="";
+let excludedPages=new Set();  // หน้าที่ซ่อน/ลบออกจาก working set
+let mOpenings=[];    // ช่องว่าง/ช่องเปิด ที่หักจากพื้นที่
+let perpMode=false;  // วัดตั้งฉาก mode
+
+const canvas    = document.getElementById("canvas");
+const ctx       = canvas.getContext("2d");
+const ws        = document.getElementById("workspace");
+const cc        = document.getElementById("cc");
+const snapCur   = document.getElementById("snap-cur");
+const snapLbl   = document.getElementById("snap-lbl");
+const ctxMenu   = document.getElementById("ctx-menu");
+const namePanel = document.getElementById("name-panel");
+const calibPanel= document.getElementById("calib-panel");
+
+// snap type config
+const SNAP_COLORS={ep:"#ffd60a",mp:"#ff9500",ct:"#5ac8fa",nl:"#30d158",ix:"#ff453a",close:"#30d158",perp:"#bf5af2"};
+const SNAP_LABELS={ep:"EP",mp:"MP",ct:"CT",nl:"NL",ix:"IX",close:"CLOSE",perp:"⊥"};
+
+// ── inline color controls ──────────────────────────────
+function applyColor(c){
+  curColor=c;
+  // if item selected → update it live
+  if(selItem){
+    if(selItem.type==="line"&&mLines[selItem.idx]) mLines[selItem.idx].color=c;
+    if(selItem.type==="poly"&&mPolys[selItem.idx]) mPolys[selItem.idx].color=c;
+    redraw();
+  }
+}
+function applyOpacity(v){
+  curOpacity=v/100;
+  document.getElementById("opacity-val").textContent=v+"%";
+  if(selItem){
+    if(selItem.type==="line"&&mLines[selItem.idx]) mLines[selItem.idx].opacity=curOpacity;
+    if(selItem.type==="poly"&&mPolys[selItem.idx]) mPolys[selItem.idx].opacity=curOpacity;
+    redraw();
+  }
+}
+function syncColorBar(item){
+  // update color bar to reflect selected item's color/opacity
+  const obj=item?.type==="line"?mLines[item.idx]:item?.type==="poly"?mPolys[item.idx]:null;
+  if(obj){
+    const c=obj.color||curColor, o=Math.round((obj.opacity??curOpacity)*100);
+    document.getElementById("inp-color").value=c.length===7?c:"#30d158";
+    document.getElementById("inp-opacity").value=o;
+    document.getElementById("opacity-val").textContent=o+"%";
+  }
+}
+function hexAlpha(hex,a){
+  const r=parseInt(hex.slice(1,3),16)||0;
+  const g=parseInt(hex.slice(3,5),16)||0;
+  const b=parseInt(hex.slice(5,7),16)||0;
+  return`rgba(${r},${g},${b},${a})`;
+}
+document.addEventListener("click",()=>ctxMenu.style.display="none");
+
+// ── undo ───────────────────────────────────────────────
+function pushUndo(){
+  undoStack.push({
+    lines:JSON.parse(JSON.stringify(mLines)),
+    polys:JSON.parse(JSON.stringify(mPolys))
+  });
+  if(undoStack.length>60)undoStack.shift();
+}
+function undo(){
+  if(!undoStack.length){setStatus("ไม่มีอะไรให้ Undo");return;}
+  const s=undoStack.pop();
+  mLines=s.lines; mPolys=s.polys;
+  saveCurrentPage(); redraw(); setStatus("↩ Undo");
+}
+
+// ── zoom buttons ───────────────────────────────────────
+function adjustZoom(factor){
+  const W=ws.clientWidth,H=ws.clientHeight;
+  const fx=W/2,fy=H/2;
+  const nz=Math.max(0.08,Math.min(8,zoom*factor));
+  panX=fx-(fx-panX)*(nz/zoom); panY=fy-(fy-panY)*(nz/zoom); zoom=nz; applyT();
+  document.getElementById("zoom-val").textContent=Math.round(zoom*100)+"%";
+}
+
+// ── area type ──────────────────────────────────────────
+function setAType(t){
+  curAType=t;
+  document.getElementById("atype-room").classList.toggle("sel",t==="room");
+  document.getElementById("atype-land").classList.toggle("sel",t==="land");
+}
+
+// ── snap toggles ───────────────────────────────────────
+function toggleSnap(t){
+  if(t==="off"){
+    snapModes.off=!snapModes.off;
+  }else{
+    snapModes[t]=!snapModes[t];
+    if(snapModes[t]) snapModes.off=false;
+  }
+  updateSnapUI();
+}
+function updateSnapUI(){
+  ["ep","mp","ct","nl","ix","off"].forEach(t=>{
+    document.getElementById("sn-"+t).classList.toggle("on", snapModes[t]);
+  });
+  // auto-load lines if NL or IX just enabled
+  if((snapModes.nl||snapModes.ix)&&pageData&&!pageData.lines?.length){
+    fetchAnalyse(curPage,true);
+  }
+}
+
+function analyseKey(n){return `${docVersion}:${n}:${getRot(n)}`;}
+function caseQuery(){
+  return currentCaseId?`case_id=${encodeURIComponent(currentCaseId)}`:"";
+}
+function thumbUrl(n, medium=false){
+  const rot=getRot(n);
+  const base=medium?"/thumb-md/":"/thumb/";
+  return `${base}${n}?${caseQuery()}&rot=${rot}&v=${docVersion}`;
+}
+function scaleState(scale){
+  if(!scale) return "missing";
+  if(scale.calibrated || scale.source==="manual") return "manual";
+  if(scale.verified) return "ok";
+  return "warn";
+}
+function scaleLabel(scale){
+  if(!scale) return "ไม่พบ scale";
+  if(scale.calibrated || scale.source==="manual") return scale.label;
+  if(scale.verified) return scale.label;
+  return `${scale.label} ?`;
+}
+function analysisWarning(d){
+  if(!d) return "";
+  if(d.warning) return d.warning;
+  if(d.degraded_mode==="raster") return "manual/raster mode";
+  return "";
+}
+function getScaleForPage(pg){
+  return pageStore[pg]?.calibScale || analyseCache[analyseKey(pg)]?.scale || null;
+}
+function lineMetrics(line, pg=curPage){
+  const ptDist=Math.hypot(line.x1-line.x0,line.y1-line.y0);
+  const scale=getScaleForPage(pg);
+  return {ptDist, dist:scale?ptDist/scale.pts_per_m:null, scale};
+}
+function polySelfIntersects(pts){
+  if(pts.length<4) return false;
+  for(let i=0;i<pts.length;i++){
+    const a1=pts[i], a2=pts[(i+1)%pts.length];
+    for(let j=i+1;j<pts.length;j++){
+      if(Math.abs(i-j)<=1) continue;
+      if(i===0 && j===pts.length-1) continue;
+      const b1=pts[j], b2=pts[(j+1)%pts.length];
+      if(segIntersect(a1.x,a1.y,a2.x,a2.y,b1.x,b1.y,b2.x,b2.y)) return true;
+    }
+  }
+  return false;
+}
+function polyMetrics(poly, pg=curPage){
+  const pts=poly.pts||[];
+  if(pts.length<3 || polySelfIntersects(pts)) return {area:null, scale:getScaleForPage(pg)};
+  const scale=getScaleForPage(pg);
+  let a=0;
+  for(let i=0;i<pts.length;i++){
+    const j=(i+1)%pts.length;
+    a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;
+  }
+  const ptArea=Math.abs(a)/2;
+  return {area:scale?ptArea/(scale.pts_per_m**2):null, scale};
+}
+function updatePageSummary(pg=curPage){
+  const el=document.getElementById("page-summary");
+  if(!el) return;
+  const polys = pg===curPage ? mPolys : (getStore(pg).polys||[]);
+  const openings = pg===curPage ? mOpenings : (getStore(pg).openings||[]);
+  const closed=polys.filter(p=>p.closed);
+  const closedOp=openings.filter(o=>o.closed);
+  if(!closed.length && !closedOp.length){
+    el.textContent="ยังไม่มีรายการพื้นที่";
+    return;
+  }
+  let roomArea=0, landArea=0, opArea=0;
+  for(const poly of closed){
+    const area=polyMetrics(poly, pg).area;
+    if(area==null) continue;
+    if(poly.areaType==="land") landArea+=area;
+    else roomArea+=area;
+  }
+  for(const op of closedOp){
+    const area=polyAreaM2(op.pts);
+    if(area!=null) opArea+=area;
+  }
+  const net=roomArea+landArea-opArea;
+  const parts=[];
+  if(roomArea>0) parts.push(`อาคาร/ห้อง ${roomArea.toFixed(2)}`);
+  if(landArea>0) parts.push(`ที่ดิน ${landArea.toFixed(2)}`);
+  if(opArea>0) parts.push(`(-)ช่องว่าง ${opArea.toFixed(2)}`);
+  parts.push(`สุทธิ ${net.toFixed(2)} ตร.ม.`);
+  el.textContent=parts.join(" · ");
+}
+function setAnalysisLoading(n,msg="กำลังวิเคราะห์…"){
+  if(n!==curPage) return;
+  pageData=null;
+  updateAnalyseUI(null, msg);
+}
+function refreshThumbImage(n){
+  const img=document.querySelector(`#th-${n} img`);
+  if(img) img.src=thumbUrl(n,false);
+}
+
+// ── coordinate transforms ──────────────────────────────
+function origSize(){
+  if(pageData?.size?.orig_w_pt)
+    return{W:pageData.size.orig_w_pt, H:pageData.size.orig_h_pt};
+  return{W:canvas.width/RS, H:canvas.height/RS};
+}
+function pdfToC(px,py){
+  const {W,H}=origSize(), rot=getRot(curPage);
+  if(rot===0)   return{x:px*RS,       y:py*RS};
+  if(rot===90)  return{x:(H-py)*RS,   y:px*RS};
+  if(rot===180) return{x:(W-px)*RS,   y:(H-py)*RS};
+               return{x:py*RS,       y:(W-px)*RS};
+}
+function cToPdf(cx,cy){
+  const {W,H}=origSize(), rot=getRot(curPage);
+  if(rot===0)   return{x:cx/RS,       y:cy/RS};
+  if(rot===90)  return{x:cy/RS,       y:H-cx/RS};
+  if(rot===180) return{x:W-cx/RS,     y:H-cy/RS};
+               return{x:W-cy/RS,     y:cx/RS};
+}
+
+// ── per-page store ─────────────────────────────────────
+function getStore(n){
+  if(!pageStore[n]) pageStore[n]={lines:[],polys:[],openings:[],calibScale:null};
+  return pageStore[n];
+}
+function saveCurrentPage(){
+  const s=getStore(curPage);
+  s.lines=[...mLines]; s.polys=[...mPolys]; s.openings=[...mOpenings];
+  if(pageData?.scale?.calibrated) s.calibScale=pageData.scale;
+}
+function restorePage(n){
+  const s=getStore(n);
+  mLines=[...s.lines]; mPolys=[...s.polys]; mOpenings=[...(s.openings||[])];
+  const key=analyseKey(n);
+  if(s.calibScale&&analyseCache[key]) analyseCache[key].scale=s.calibScale;
+  updatePageSummary(n);
+}
+
+// ── rotation ───────────────────────────────────────────
+function getRot(n){return pageRotations[n]||0;}
+function rotatePage(delta){
+  saveCurrentPage();
+  const r=(getRot(curPage)+delta+360)%360;
+  pageRotations[curPage]=r;
+  const b=document.getElementById("rot-badge");
+  b.style.display=r?"inline":"none"; b.textContent=r+"°";
+  refreshThumbImage(curPage);
+  reloadPageImage();
+}
+function reloadPageImage(){
+  const loadToken=++pageLoadSeq;
+  const rot=getRot(curPage);
+  setAnalysisLoading(curPage,"กำลังหมุน/วิเคราะห์…");
+  const img=new Image();
+  const pageAtRequest=curPage;
+  img.onload=()=>{
+    if(loadToken!==pageLoadSeq||pageAtRequest!==curPage||rot!==getRot(curPage)) return;
+    bgImg=img;canvas.width=img.width;canvas.height=img.height;fitToWindow();redraw();
+  };
+  img.src=`/page/${curPage}?${caseQuery()}&scale=${RS}&rot=${rot}&v=${docVersion}&t=${Date.now()}`;
+  fetchAnalyse(curPage);
+}
+function fetchAnalyse(n, forceLines=false){
+  const requestSeq=++analyseSeq;
+  const versionAtRequest=docVersion;
+  const rot=getRot(n);
+  fetch(`/analyse/${n}?${caseQuery()}&rot=${rot}`).then(async r=>{
+    let d=null;
+    try{d=await r.json();}catch{}
+    if(!r.ok) throw new Error(d?.error||"analyse failed");
+    return d;
+  }).then(d=>{
+    if(requestSeq!==analyseSeq||versionAtRequest!==docVersion||rot!==getRot(n)) return;
+    if(pageStore[n]?.calibScale) d.scale=pageStore[n].calibScale;
+    analyseCache[analyseKey(n)]=d;
+    if(n===curPage){pageData=d;updateAnalyseUI(d);}
+    const ts=document.getElementById("ts-"+n);
+    if(ts){
+      if(d.scale){ts.textContent=scaleLabel(d.scale);ts.className="thumb-scale";}
+      else{ts.textContent="no scale";ts.className="thumb-scale none";}
+    }
+    const parts=[scaleLabel(d.scale)];
+    if(d.degraded_mode==="raster") parts.push("manual/raster mode");
+    else parts.push((d.snaps?.length||0)+" pts",(d.lines?.length||0)+" segs");
+    if(d.warning) parts.push(d.warning);
+    setStatus(parts.join(" · "));
+  }).catch(err=>{
+    if(versionAtRequest!==docVersion||n!==curPage) return;
+    setStatus(`analyse error: ${err.message}`);
+    updateAnalyseUI(null,"วิเคราะห์หน้าไม่สำเร็จ");
+  });
+}
+function updateAnalyseUI(d, loadingMsg=""){
+  const badge=document.getElementById("scale-badge");
+  const lblS=document.getElementById("lbl-scale");
+  if(!d){
+    badge.className="warn";
+    badge.textContent=loadingMsg||"กำลังวิเคราะห์…";
+    lblS.textContent="—";
+    document.getElementById("lbl-snaps").textContent="—";
+    updatePageSummary(curPage);
+    redraw();
+    return;
+  }
+  if(d.scale){
+    badge.className=scaleState(d.scale);
+    badge.textContent=scaleLabel(d.scale);
+    lblS.textContent=scaleLabel(d.scale);
+  }else{
+    badge.className="";
+    badge.textContent="ไม่พบ scale";
+    lblS.textContent="—";
+  }
+  document.getElementById("lbl-snaps").textContent=
+    d.degraded_mode==="raster" ? "manual only" : (d.snaps?.length||0)+" pts";
+  updatePageSummary(curPage);
+  redraw();
+}
+
+// ── upload ─────────────────────────────────────────────
+document.getElementById("file-input").addEventListener("change",async e=>{
+  const file=e.target.files[0]; if(!file)return;
+  setStatus("กำลังโหลด…");
+  const fd=new FormData();fd.append("file",file);
+  const res=await fetch("/upload",{method:"POST",body:fd});
+  const d=await res.json();
+  if(!res.ok){
+    setStatus("upload ไม่สำเร็จ: "+(d.error||"unknown error"));
+    e.target.value="";
+    return;
+  }
+  docVersion++;
+  pageLoadSeq++;
+  analyseSeq++;
+  pageData=null;bgImg=null;
+  currentCaseId=d.case_id||"";
+  pageStore={};analyseCache={};pageRotations={};pageTags={};projectInfo={};excludedPages=new Set();
+  totalPages=d.pages; currentFileName=file.name;
+  buildThumbs(totalPages);
+  openSetup();
+  setStatus(`โหลด ${d.pages} หน้าแล้ว`);
+  e.target.value="";
+});
+
+// ── thumbs ─────────────────────────────────────────────
+function buildThumbs(n){
+  const strip=document.getElementById("thumb-strip");strip.innerHTML="";
+  for(let i=1;i<=n;i++){
+    const div=document.createElement("div");
+    div.className="thumb-item";div.id="th-"+i;
+    div.innerHTML=`<img src="${thumbUrl(i,false)}" loading="lazy"><span>หน้า ${i}</span><span class="thumb-scale none" id="ts-${i}">…</span><span class="thumb-dot" id="td-${i}"></span><span class="thumb-tag" id="tt-${i}"></span>`;
+    div.addEventListener("click",()=>loadPage(i));
+    strip.appendChild(div);
+  }
+}
+function updateThumbTag(n){
+  const el=document.getElementById("tt-"+n);
+  if(!el)return;
+  const tag=pageTags[n]||"";
+  const opt=TAG_OPTIONS.find(o=>o.value===tag);
+  if(tag&&opt){
+    el.className="thumb-tag tag-badge "+opt.cls;
+    el.textContent=opt.label;
+  }else{
+    el.className="thumb-tag";el.textContent="";
+  }
+}
+function setThumbActive(n){
+  document.querySelectorAll(".thumb-item").forEach(e=>e.classList.remove("active"));
+  const el=document.getElementById("th-"+n);
+  if(el){el.classList.add("active");el.scrollIntoView({block:"nearest"});}
+}
+function updateThumbDot(n){
+  const el=document.getElementById("td-"+n);
+  if(!el)return;
+  const s=pageStore[n];
+  const cnt=(s?.lines?.length||0)+(s?.polys?.filter(p=>p.closed).length||0);
+  el.textContent=cnt?cnt+" รายการ":"";
+}
+
+// ── load page ──────────────────────────────────────────
+function getNextPage(n){
+  for(let i=n+1;i<=totalPages;i++) if(!excludedPages.has(i)) return i;
+  return null;
+}
+function getPrevPage(n){
+  for(let i=n-1;i>=1;i--) if(!excludedPages.has(i)) return i;
+  return null;
+}
+
+async function loadPage(n){
+  saveCurrentPage(); updateThumbDot(curPage);
+  const loadToken=++pageLoadSeq;
+  curPage=n; setThumbActive(n); setStatus("โหลดหน้า "+n+"…");
+  document.getElementById("page-lbl").textContent=n+" / "+totalPages;
+  document.getElementById("btn-prev").disabled=!getPrevPage(n);
+  document.getElementById("btn-next").disabled=!getNextPage(n);
+  mPts=[];calibPts=[];
+  calibPanel.style.display="none";
+  snapTarget=null;snapCur.style.display="none";snapLbl.style.display="none";
+  document.getElementById("measure-result").textContent="";
+  const rot=getRot(n);
+  const b=document.getElementById("rot-badge");
+  b.style.display=rot?"inline":"none"; b.textContent=rot?rot+"°":"";
+  restorePage(n);
+  setAnalysisLoading(n,"กำลังโหลดหน้า…");
+  await new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{bgImg=img;canvas.width=img.width;canvas.height=img.height;res();};
+    img.src=`/page/${n}?${caseQuery()}&scale=${RS}&rot=${rot}&v=${docVersion}`;
+  });
+  if(loadToken!==pageLoadSeq||n!==curPage||rot!==getRot(n)) return;
+  fitToWindow();redraw();
+  const cached=analyseCache[analyseKey(n)];
+  if(cached){pageData=cached;updateAnalyseUI(pageData);}
+  fetchAnalyse(n);
+}
+
+// ── fit ────────────────────────────────────────────────
+function fitToWindow(){
+  const W=ws.clientWidth,H=ws.clientHeight;
+  zoom=Math.min((W-20)/canvas.width,(H-20)/canvas.height,2);
+  panX=Math.round((W-canvas.width*zoom)/2);
+  panY=Math.round((H-canvas.height*zoom)/2);
+  applyT();
+}
+function applyT(){
+  cc.style.transform=`translate(${panX}px,${panY}px) scale(${zoom})`;
+  document.getElementById("zoom-val").textContent=Math.round(zoom*100)+"%";
+}
+
+// ── snap ───────────────────────────────────────────────
+function snap(cx,cy){
+  if(snapModes.off||!pageData) return{x:cx,y:cy,t:null};
+  const R=snapRadius/zoom;  // snap radius in canvas px (zoom-corrected)
+  const R2=R*R;
+
+  // ── Tier 0: close-polygon (highest priority) ─────────
+  if(mode==="area"&&mPts.length>=2){
+    const c0=pdfToC(mPts[0].x,mPts[0].y);
+    if((c0.x-cx)*(c0.x-cx)+(c0.y-cy)*(c0.y-cy)<closeRadius*closeRadius/zoom/zoom){
+      return{x:c0.x,y:c0.y,t:"close"};
+    }
+  }
+
+  // ── Tier 1: static points (EP > MP > CT) ─────────────
+  for(const preferred of ["ep","mp","ct"]){
+    if(!snapModes[preferred]) continue;
+    let best=null,bd=R2;
+    for(const s of (pageData.snaps||[])){
+      if(s.t!==preferred) continue;
+      const sx=s.x*RS, sy=s.y*RS;
+      const d=(sx-cx)*(sx-cx)+(sy-cy)*(sy-cy);
+      if(d<bd){bd=d;best={x:sx,y:sy,t:preferred};}
+    }
+    if(best) return best;
+  }
+
+  // ── Tier 2: NL — nearest point on nearby segments ────
+  let best=null,bd=R2,bt=null;
+  if(snapModes.nl){
+    const preR=R*4;
+    for(const l of (pageData.lines||[])){
+      const mx=(l[0]+l[2])/2*RS, my=(l[1]+l[3])/2*RS;
+      if(Math.abs(mx-cx)>preR||Math.abs(my-cy)>preR) continue;
+      const p=nearestOnSeg(cx,cy,l[0]*RS,l[1]*RS,l[2]*RS,l[3]*RS);
+      const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+      if(d<bd){bd=d;best={x:p.x,y:p.y};bt="nl";}
+    }
+    if(best) return{...best,t:bt};
+  }
+
+  // ── Tier 3: IX — intersections of nearby lines ───────
+  if(snapModes.ix){
+    const preR=R*8;
+    const near=(pageData.lines||[]).filter(l=>{
+      const mx=(l[0]+l[2])/2*RS, my=(l[1]+l[3])/2*RS;
+      return Math.hypot(mx-cx,my-cy)<preR;
+    });
+    for(let i=0;i<near.length;i++){
+      for(let j=i+1;j<near.length;j++){
+        const p=segIntersect(
+          near[i][0]*RS,near[i][1]*RS,near[i][2]*RS,near[i][3]*RS,
+          near[j][0]*RS,near[j][1]*RS,near[j][2]*RS,near[j][3]*RS);
+        if(!p) continue;
+        const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+        if(d<bd){bd=d;best={x:p.x,y:p.y};bt="ix";}
+      }
+    }
+  }
+
+  // ── Tier 4: PERP — perpendicular snap to nearest line ──
+  if(perpMode && mPts.length > 0){
+    const lastPt = pdfToC(mPts[mPts.length-1].x, mPts[mPts.length-1].y);
+    const preR=R*6;
+    for(const l of (pageData.lines||[])){
+      const mx=(l[0]+l[2])/2*RS, my=(l[1]+l[3])/2*RS;
+      if(Math.abs(mx-cx)>preR||Math.abs(my-cy)>preR) continue;
+      const p=nearestOnSeg(cx,cy,l[0]*RS,l[1]*RS,l[2]*RS,l[3]*RS);
+      // check if the line from lastPt to p is roughly perpendicular to segment l
+      const segDx=l[2]*RS-l[0]*RS, segDy=l[3]*RS-l[1]*RS;
+      const perpDx=p.x-lastPt.x, perpDy=p.y-lastPt.y;
+      const dot=Math.abs(segDx*perpDx+segDy*perpDy);
+      const segLen=Math.hypot(segDx,segDy);
+      if(segLen>0.1 && dot/segLen < R*0.5){
+        const d=(p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy);
+        if(d<bd){bd=d;best={x:p.x,y:p.y};bt="perp";}
+      }
+    }
+    // also snap to a point that makes a perpendicular line from lastPt
+    for(const l of (pageData.lines||[])){
+      const mx=(l[0]+l[2])/2*RS, my=(l[1]+l[3])/2*RS;
+      if(Math.abs(mx-cx)>preR||Math.abs(my-cy)>preR) continue;
+      const foot=perpFoot(lastPt.x,lastPt.y,l[0]*RS,l[1]*RS,l[2]*RS,l[3]*RS);
+      if(!foot) continue;
+      const d=(foot.x-cx)*(foot.x-cx)+(foot.y-cy)*(foot.y-cy);
+      if(d<bd){bd=d;best={x:foot.x,y:foot.y};bt="perp";}
+    }
+  }
+
+  return best?{...best,t:bt}:{x:cx,y:cy,t:null};
+}
+
+function nearestOnSeg(px,py,x0,y0,x1,y1){
+  const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;
+  if(len2<0.01)return{x:x0,y:y0};
+  const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));
+  return{x:x0+t*dx,y:y0+t*dy};
+}
+function perpFoot(px,py,x0,y0,x1,y1){
+  const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;
+  if(len2<0.01) return null;
+  const t=((px-x0)*dx+(py-y0)*dy)/len2;
+  if(t<0||t>1) return null;
+  return{x:x0+t*dx,y:y0+t*dy};
+}
+function segIntersect(x0,y0,x1,y1,x2,y2,x3,y3){
+  const d1x=x1-x0,d1y=y1-y0,d2x=x3-x2,d2y=y3-y2;
+  const cross=d1x*d2y-d1y*d2x;
+  if(Math.abs(cross)<0.5)return null;
+  const dx=x2-x0,dy=y2-y0;
+  const t=(dx*d2y-dy*d2x)/cross;
+  const u=(dx*d1y-dy*d1x)/cross;
+  if(t<0||t>1||u<0||u>1)return null;
+  return{x:x0+t*d1x,y:y0+t*d1y};
+}
+
+// ── measure helpers ────────────────────────────────────
+function ptsToM(p1,p2){
+  const scale=getScaleForPage(curPage);
+  if(!scale)return null;
+  return Math.hypot(p2.x-p1.x,p2.y-p1.y)/scale.pts_per_m;
+}
+function polyAreaM2(pts){
+  const scale=getScaleForPage(curPage);
+  if(!scale)return null;
+  let a=0;
+  for(let i=0;i<pts.length;i++){
+    const j=(i+1)%pts.length;
+    a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;
+  }
+  return Math.abs(a)/(2*scale.pts_per_m**2);
+}
+function toRNW(m2){
+  if(m2==null)return"";
+  return`${Math.floor(m2/1600)}-${Math.floor((m2%1600)/400)}-${((m2%400)/4).toFixed(2)} ว.`;
+}
+let _id=0;
+function nid(){return++_id;}
+
+// ── redraw ─────────────────────────────────────────────
+function redraw(){
+  if(!bgImg)return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(bgImg,0,0);
+
+  const lw=Math.max(1, 2/zoom);  // line width stays ~2px on screen
+  const ds=[8/zoom,4/zoom];       // dash stays ~8px on screen
+
+  mLines.forEach(s=>{
+    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
+    const col=s.color||"#ffd60a", opa=s.opacity??0.85;
+    const metrics=lineMetrics(s);
+    ctx.save();ctx.globalAlpha=opa;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+    ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash(ds);ctx.stroke();
+    ctx.restore();
+    const lbl=metrics.dist!=null?metrics.dist.toFixed(2)+" ม.":metrics.ptDist.toFixed(1)+" pt";
+    drawLbl((a.x+b.x)/2,(a.y+b.y)/2,lbl);
+  });
+
+  mPolys.forEach(poly=>{
+    if(poly.pts.length<2)return;
+    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
+    const col=poly.color||"#30d158", opa=poly.opacity??0.85;
+    ctx.save();ctx.globalAlpha=opa;
+    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
+    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
+    if(poly.closed)ctx.closePath();
+    ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.stroke();
+    if(poly.closed){ctx.fillStyle=hexAlpha(col,.08);ctx.fill();}
+    ctx.restore();
+    if(poly.closed){
+      const metrics=polyMetrics(poly);
+      const cx2=cp.reduce((s,p)=>s+p.x,0)/cp.length;
+      const cy2=cp.reduce((s,p)=>s+p.y,0)/cp.length;
+      drawPolyLabel(cx2,cy2,poly.name,metrics.area,poly.areaType);
+      // draw edge lengths
+      const scale=getScaleForPage(curPage);
+      if(scale){
+        for(let i=0;i<cp.length;i++){
+          const j=(i+1)%cp.length;
+          const mx=(cp[i].x+cp[j].x)/2, my=(cp[i].y+cp[j].y)/2;
+          const dist=Math.hypot(poly.pts[j].x-poly.pts[i].x, poly.pts[j].y-poly.pts[i].y)/scale.pts_per_m;
+          drawEdgeLbl(mx,my,dist.toFixed(2)+" ม.");
+        }
+      }
+    }
+  });
+
+  // openings (ช่องว่าง)
+  mOpenings.forEach(op=>{
+    if(op.pts.length<2)return;
+    const cp=op.pts.map(p=>pdfToC(p.x,p.y));
+    const col=op.color||"#ff453a", opa=op.opacity??0.5;
+    ctx.save();ctx.globalAlpha=opa;
+    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
+    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
+    if(op.closed)ctx.closePath();
+    ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash([6/zoom,4/zoom]);ctx.stroke();
+    if(op.closed){ctx.fillStyle=hexAlpha(col,.06);ctx.fill();}
+    ctx.restore();
+    if(op.closed){
+      const cx2=cp.reduce((s,p)=>s+p.x,0)/cp.length;
+      const cy2=cp.reduce((s,p)=>s+p.y,0)/cp.length;
+      const area=polyAreaM2(op.pts);
+      drawPolyLabel(cx2,cy2,op.name||"ช่องว่าง",area,"opening");
+      const scale=getScaleForPage(curPage);
+      if(scale){
+        for(let i=0;i<cp.length;i++){
+          const j=(i+1)%cp.length;
+          const mx=(cp[i].x+cp[j].x)/2, my=(cp[i].y+cp[j].y)/2;
+          const dist=Math.hypot(op.pts[j].x-op.pts[i].x, op.pts[j].y-op.pts[i].y)/scale.pts_per_m;
+          drawEdgeLbl(mx,my,dist.toFixed(2)+" ม.");
+        }
+      }
+    }
+  });
+
+  // in-progress pts
+  if(mPts.length>0){
+    const cp=mPts.map(p=>pdfToC(p.x,p.y));
+    ctx.save();
+    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
+    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.strokeStyle=curColor;ctx.lineWidth=lw;ctx.setLineDash([6/zoom,3/zoom]);ctx.stroke();
+
+    // ghost line → snap target
+    if(snapTarget){
+      ctx.beginPath();ctx.moveTo(cp[cp.length-1].x,cp[cp.length-1].y);
+      ctx.lineTo(snapTarget.x,snapTarget.y);
+      ctx.strokeStyle="rgba(255,255,255,0.25)";ctx.lineWidth=lw;
+      ctx.setLineDash([4/zoom,4/zoom]);ctx.stroke();
+    }
+    ctx.restore();
+
+    cp.forEach(p=>{
+      ctx.beginPath();ctx.arc(p.x,p.y,4/zoom,0,Math.PI*2);
+      ctx.fillStyle=curColor;ctx.fill();
+    });
+
+    // close hint — กรอบเขียวรอบจุดแรกเมื่อใกล้พอ
+    if(mode==="area"&&cp.length>=2&&snapTarget?.t==="close"){
+      ctx.save();
+      ctx.beginPath();ctx.arc(cp[0].x,cp[0].y,10/zoom,0,Math.PI*2);
+      ctx.strokeStyle="#30d158";ctx.lineWidth=2/zoom;ctx.setLineDash([]);
+      ctx.globalAlpha=0.8;ctx.stroke();
+      ctx.globalAlpha=0.12;ctx.fillStyle="#30d158";ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // calib
+  calibPts.forEach(p=>{
+    ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,8,0,Math.PI*2);
+    ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fillStyle="#bf5af2";ctx.fill();ctx.restore();
+  });
+  if(calibPts.length===2){
+    ctx.save();ctx.beginPath();ctx.moveTo(calibPts[0].x,calibPts[0].y);
+    ctx.lineTo(calibPts[1].x,calibPts[1].y);
+    ctx.strokeStyle="#bf5af2";ctx.lineWidth=2;ctx.setLineDash([10,5]);ctx.stroke();ctx.restore();
+  }
+
+  // snap indicator on canvas — shape by type
+  if(snapTarget&&snapTarget.t&&mode!=="pan"&&mode!=="sel"){
+    const col=SNAP_COLORS[snapTarget.t]||"#ffd60a";
+    const sx=snapTarget.x, sy=snapTarget.y;
+    const r=7/zoom, lw2=1.8/zoom;
+    ctx.save();ctx.strokeStyle=col;ctx.lineWidth=lw2;ctx.setLineDash([]);
+    if(snapTarget.t==="ep"){
+      // square □
+      ctx.strokeRect(sx-r,sy-r,r*2,r*2);
+    }else if(snapTarget.t==="mp"){
+      // diamond ◇
+      ctx.beginPath();ctx.moveTo(sx,sy-r);ctx.lineTo(sx+r,sy);
+      ctx.lineTo(sx,sy+r);ctx.lineTo(sx-r,sy);ctx.closePath();ctx.stroke();
+    }else if(snapTarget.t==="ct"){
+      // circle with cross ⊕
+      ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sx-r,sy);ctx.lineTo(sx+r,sy);
+      ctx.moveTo(sx,sy-r);ctx.lineTo(sx,sy+r);ctx.stroke();
+    }else if(snapTarget.t==="nl"){
+      // X on line ✕
+      ctx.beginPath();ctx.moveTo(sx-r,sy-r);ctx.lineTo(sx+r,sy+r);
+      ctx.moveTo(sx+r,sy-r);ctx.lineTo(sx-r,sy+r);ctx.stroke();
+    }else if(snapTarget.t==="ix"){
+      // + cross
+      ctx.beginPath();ctx.moveTo(sx-r,sy);ctx.lineTo(sx+r,sy);
+      ctx.moveTo(sx,sy-r);ctx.lineTo(sx,sy+r);ctx.stroke();
+    }else if(snapTarget.t==="perp"){
+      // perpendicular symbol ⟂
+      ctx.beginPath();ctx.moveTo(sx-r,sy+r);ctx.lineTo(sx,sy);ctx.lineTo(sx+r,sy+r);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(sx,sy-r);ctx.stroke();
+    }else if(snapTarget.t==="close"){
+      // double circle 🎯
+      ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(sx,sy,r*0.45,0,Math.PI*2);
+      ctx.fillStyle=col;ctx.globalAlpha=0.7;ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // selection highlight
+  if(selItem&&mode==="sel") drawSelHighlight(selItem);
+}
+
+function drawSelHighlight(sel){
+  const hw=6/zoom;  // handle half-width in canvas px
+  ctx.save();
+  ctx.strokeStyle="#fff";ctx.lineWidth=2/zoom;ctx.setLineDash([6/zoom,3/zoom]);
+  if(sel.type==="line"&&mLines[sel.idx]){
+    const s=mLines[sel.idx];
+    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    // endpoint handles
+    [a,b].forEach(p=>{
+      ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);
+      ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);
+    });
+  }else if(sel.type==="poly"&&mPolys[sel.idx]){
+    const poly=mPolys[sel.idx];
+    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
+    ctx.beginPath();ctx.moveTo(cp[0].x,cp[0].y);
+    cp.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
+    if(poly.closed)ctx.closePath();
+    ctx.stroke();
+    // vertex handles
+    cp.forEach(p=>{
+      ctx.fillStyle="#fff";ctx.fillRect(p.x-hw,p.y-hw,hw*2,hw*2);
+      ctx.strokeStyle="#0a84ff";ctx.lineWidth=1.5/zoom;ctx.strokeRect(p.x-hw,p.y-hw,hw*2,hw*2);
+    });
+  }
+  ctx.restore();
+}
+
+// Labels always appear ~13px on screen regardless of zoom
+function lblFs(){return Math.max(10, Math.round(13/zoom));}
+
+function drawLbl(x,y,t){
+  const fs=lblFs(), pad=Math.round(3/zoom);
+  ctx.save();ctx.font=`bold ${fs}px sans-serif`;
+  const tw=ctx.measureText(t).width;
+  ctx.fillStyle="rgba(0,0,0,.72)";
+  ctx.fillRect(x-tw/2-pad, y-fs*0.85, tw+pad*2, fs*1.25);
+  ctx.fillStyle="#ffffff";ctx.fillText(t,x-tw/2,y+fs*0.3);
+  ctx.restore();
+}
+function drawPolyLabel(cx2,cy2,name,area,areaType){
+  const fs=lblFs(), lh=Math.round(fs*1.4), pad=Math.round(4/zoom);
+  ctx.save();ctx.font=`bold ${fs}px sans-serif`;
+  const rows=[];
+  if(name) rows.push({t:name,c:"#5ac8fa"});
+  if(area!=null){
+    rows.push({t:area.toFixed(2)+" ตร.ม.",c:"#ffffff"});
+    if(areaType==="land") rows.push({t:toRNW(area),c:"#a8e6c0"});
+  }
+  if(!rows.length){ctx.restore();return;}
+  const mw=Math.max(...rows.map(r=>ctx.measureText(r.t).width));
+  const bh=rows.length*lh+pad*2;
+  const bx=cx2-mw/2-pad, by=cy2-bh/2;
+  ctx.fillStyle="rgba(0,0,0,.72)";
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(bx,by,mw+pad*2,bh,Math.round(4/zoom));
+  else ctx.rect(bx,by,mw+pad*2,bh);
+  ctx.fill();
+  rows.forEach((r,i)=>{
+    const tw=ctx.measureText(r.t).width;
+    ctx.fillStyle=r.c;
+    ctx.fillText(r.t,cx2-tw/2,by+pad+fs*0.9+i*lh);
+  });
+  ctx.restore();
+}
+
+function drawEdgeLbl(x,y,t){
+  const fs=Math.max(8, Math.round(10/zoom)), pad=Math.round(2/zoom);
+  ctx.save();ctx.font=`bold ${fs}px sans-serif`;
+  const tw=ctx.measureText(t).width;
+  ctx.fillStyle="rgba(0,0,0,.6)";
+  ctx.fillRect(x-tw/2-pad, y-fs*0.75, tw+pad*2, fs*1.15);
+  ctx.fillStyle="#ffd60a";ctx.fillText(t,x-tw/2,y+fs*0.25);
+  ctx.restore();
+}
+
+// ── screen ─────────────────────────────────────────────
+function cXY(e){
+  const r=canvas.getBoundingClientRect();
+  return{x:(e.clientX-r.left)*(canvas.width/r.width),
+         y:(e.clientY-r.top)*(canvas.height/r.height)};
+}
+
+// ── hit detection ─────────────────────────────────────
+function distToSeg(px,py,x0,y0,x1,y1){
+  const dx=x1-x0,dy=y1-y0,len2=dx*dx+dy*dy;
+  if(len2<0.01) return Math.hypot(px-x0,py-y0);
+  const t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/len2));
+  return Math.hypot(px-x0-t*dx,py-y0-t*dy);
+}
+function ptInPoly(px,py,pts){
+  let inside=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+    const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;
+    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function hitTest(cx,cy){
+  // cx,cy in canvas px — returns {type,idx} or null
+  const THR=12/zoom;
+  // check polys first (filled area easier to click)
+  for(let i=mPolys.length-1;i>=0;i--){
+    const poly=mPolys[i];
+    if(!poly.closed) continue;
+    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
+    if(ptInPoly(cx,cy,cp)) return{type:"poly",idx:i};
+    // also check border
+    for(let j=0;j<cp.length;j++){
+      const nj=(j+1)%cp.length;
+      if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR)
+        return{type:"poly",idx:i};
+    }
+  }
+  // check lines
+  for(let i=mLines.length-1;i>=0;i--){
+    const s=mLines[i];
+    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
+    if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR) return{type:"line",idx:i};
+  }
+  return null;
+}
+
+// ── click ──────────────────────────────────────────────
+ws.addEventListener("mousedown",e=>{
+  if(e.button===2)return;
+  // select mode
+  if(mode==="sel"){
+    const {x:cx,y:cy}=cXY(e);
+    const hit=hitTest(cx,cy);
+    if(hit){
+      selItem=hit;
+      syncColorBar(hit);
+      // start drag — store starting PDF pt and original data
+      const pStart=cToPdf(cx,cy);
+      let origData;
+      if(hit.type==="line"){
+        const s=mLines[hit.idx];
+        origData={x0:s.x0,y0:s.y0,x1:s.x1,y1:s.y1};
+      }else{
+        origData=mPolys[hit.idx].pts.map(p=>({...p}));
+      }
+      dragState={...hit,startPdf:pStart,origData};
+      ws.style.cursor="move";
+    }else{
+      selItem=null;dragState=null;
+    }
+    redraw();return;
+  }
+  if(mode==="pan"||e.button===1||spaceDown){
+    isPan=true;lastMx=e.clientX;lastMy=e.clientY;ws.style.cursor="grabbing";return;
+  }
+  const {x:cx,y:cy}=cXY(e);
+  const sc=snap(cx,cy);
+  const p=cToPdf(sc.x,sc.y);  // store as unrotated PDF pt
+
+  if(mode==="dist"){
+    mPts.push(p);
+    if(mPts.length===1){
+      document.getElementById("measure-result").textContent="• คลิกจุดที่ 2";
+    }else{
+      const dist=ptsToM(mPts[0],mPts[1]);
+      const ptD=Math.hypot(mPts[1].x-mPts[0].x,mPts[1].y-mPts[0].y);
+      const base={x0:mPts[0].x,y0:mPts[0].y,x1:mPts[1].x,y1:mPts[1].y,
+                  ptDist:ptD,id:nid(),color:curColor,opacity:curOpacity};
+      pushUndo();
+      if(dist!=null){
+        mLines.push({...base,dist});
+        document.getElementById("measure-result").textContent="📏 "+dist.toFixed(3)+" ม.";
+      }else{
+        mLines.push({...base,dist:null});
+        document.getElementById("measure-result").textContent="📏 "+ptD.toFixed(1)+" pt (สอบเทียบก่อน)";
+      }
+      mPts=[];
+    }
+  }else if(mode==="area"){
+    if(mPts.length>=2){
+      const c0=pdfToC(mPts[0].x,mPts[0].y);
+      if(sc.t==="close"||Math.hypot(sc.x-c0.x,sc.y-c0.y)<closeRadius/zoom){
+        if(mPts.length<3){setStatus("polygon ต้องมีอย่างน้อย 3 จุด");return;}
+        if(polySelfIntersects(mPts)){setStatus("polygon ตัดกันเอง ใช้ตรวจพื้นที่ไม่ได้");return;}
+        const area=polyAreaM2(mPts);
+        pushUndo();
+        if(perpMode){
+          const op={pts:[...mPts],closed:true,name:"",id:nid(),color:"#ff453a",opacity:0.6};
+          mOpenings.push(op);
+          if(area!=null)
+            document.getElementById("measure-result").textContent=`⬡ ช่องว่าง ${area.toFixed(2)} ตร.ม.`;
+          mPts=[];
+          openNamePanel("ชื่อช่องว่าง",(nm)=>{op.name=nm;updatePageSummary(curPage);redraw();},"",false);
+        }else{
+          curAType="room"; setAType("room");
+          const poly={pts:[...mPts],closed:true,name:"",areaType:"room",
+                      id:nid(),color:curColor,opacity:curOpacity};
+          mPolys.push(poly);
+          if(area!=null)
+            document.getElementById("measure-result").textContent=
+              `⬡ ${area.toFixed(2)} ตร.ม.`;
+          mPts=[];
+          openNamePanel("ชื่อพื้นที่",(nm,at)=>{poly.name=nm;poly.areaType=at;updatePageSummary(curPage);redraw();},
+            "", true);
+        }
+        updatePageSummary(curPage);
+        return;
+      }
+    }
+    mPts.push(p);
+  }else if(mode==="calib"){
+    calibPts.push({x:sc.x,y:sc.y});
+    if(calibPts.length===1){setStatus("คลิกจุดที่ 2…");redraw();return;}
+    if(calibPts.length===2){
+      const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;
+      document.getElementById("calib-line-info").textContent=
+        "เส้น "+Math.hypot(dx,dy).toFixed(1)+" pt · ป้อนระยะจริง:";
+      calibPanel.style.display="block";
+      document.getElementById("calib-input").value="";
+      document.getElementById("calib-input").focus();
+    }
+    return;
+  }
+  redraw();
+});
+
+// ── context menu ───────────────────────────────────────
+ws.addEventListener("contextmenu",e=>{
+  e.preventDefault();
+  const {x:cx,y:cy}=cXY(e);
+  // in select mode, prefer the already-selected item if click is near it
+  const hit=(mode==="sel"&&selItem)?selItem:findNearest(cx,cy,40);
+  if(!hit){ctxMenu.style.display="none";return;}
+  ctxTarget=hit;
+  if(mode==="sel"){selItem=hit;redraw();}
+  // sync color row to item's current color
+  const ctxObj=hit.type==="line"?mLines[hit.idx]:mPolys[hit.idx];
+  if(ctxObj){
+    const c=ctxObj.color||curColor, o=Math.round((ctxObj.opacity??curOpacity)*100);
+    document.getElementById("ctx-inp-color").value=c.length===7?c:"#30d158";
+    document.getElementById("ctx-inp-opacity").value=o;
+    document.getElementById("ctx-opacity-val").textContent=o+"%";
+  }
+  document.getElementById("ctx-rename").style.display=hit.type==="poly"?"block":"none";
+  // position menu (flip if near bottom/right edge)
+  const mw=200, mh=150;
+  const lx=e.clientX+mw>innerWidth?e.clientX-mw:e.clientX;
+  const ly=e.clientY+mh>innerHeight?e.clientY-mh:e.clientY;
+  ctxMenu.style.left=lx+"px";ctxMenu.style.top=ly+"px";
+  ctxMenu.style.display="block";
+});
+// stop ctx-menu clicks from closing the menu via document listener
+ctxMenu.addEventListener("click",e=>e.stopPropagation());
+
+function findNearest(cx,cy,r){
+  let best=null,bd=r;
+  mLines.forEach((s,i)=>{
+    const a=pdfToC(s.x0,s.y0),b=pdfToC(s.x1,s.y1);
+    const d=Math.hypot(cx-(a.x+b.x)/2, cy-(a.y+b.y)/2);
+    if(d<bd){bd=d;best={type:"line",idx:i};}
+  });
+  mPolys.forEach((poly,i)=>{
+    if(!poly.closed)return;
+    const cp=poly.pts.map(p=>pdfToC(p.x,p.y));
+    const mx=cp.reduce((s,p)=>s+p.x,0)/cp.length;
+    const my=cp.reduce((s,p)=>s+p.y,0)/cp.length;
+    const d=Math.hypot(cx-mx,cy-my);
+    if(d<bd){bd=d;best={type:"poly",idx:i};}
+  });
+  return best;
+}
+function ctxColor(c){
+  if(!ctxTarget)return;
+  const obj=ctxTarget.type==="line"?mLines[ctxTarget.idx]:mPolys[ctxTarget.idx];
+  if(obj){obj.color=c;redraw();}
+  curColor=c;
+  document.getElementById("inp-color").value=c.length===7?c:"#30d158";
+}
+function ctxOpacity(v){
+  if(!ctxTarget)return;
+  const obj=ctxTarget.type==="line"?mLines[ctxTarget.idx]:mPolys[ctxTarget.idx];
+  if(obj){obj.opacity=v/100;redraw();}
+  curOpacity=v/100;
+  document.getElementById("ctx-opacity-val").textContent=v+"%";
+  document.getElementById("inp-opacity").value=v;
+  document.getElementById("opacity-val").textContent=v+"%";
+}
+function ctxDelete(){
+  if(!ctxTarget)return;
+  pushUndo();
+  if(ctxTarget.type==="line") mLines.splice(ctxTarget.idx,1);
+  else mPolys.splice(ctxTarget.idx,1);
+  ctxTarget=null;updatePageSummary(curPage);redraw();
+}
+function ctxRename(){
+  if(!ctxTarget||ctxTarget.type!=="poly")return;
+  const poly=mPolys[ctxTarget.idx];
+    openNamePanel("เปลี่ยนชื่อ",(nm)=>{poly.name=nm;updatePageSummary(curPage);redraw();},poly.name);
+}
+
+// ── name panel ─────────────────────────────────────────
+function openNamePanel(title,cb,val="",showAType=false){
+  document.getElementById("name-panel-title").textContent=title;
+  document.getElementById("name-input").value=val;
+  document.getElementById("atype-row").style.display=showAType?"flex":"none";
+  if(showAType){curAType="room";setAType("room");}
+  namePanel.style.display="block";
+  document.getElementById("name-input").focus();
+  nameCb=cb;
+}
+function finishName(){
+  const v=document.getElementById("name-input").value.trim();
+  namePanel.style.display="none";
+  if(nameCb)nameCb(v, curAType); nameCb=null;
+}
+function cancelName(){
+  namePanel.style.display="none";
+  if(nameCb)nameCb("", curAType); nameCb=null;
+}
+document.getElementById("name-input").addEventListener("keydown",e=>{
+  if(e.key==="Enter")finishName();
+  if(e.key==="Escape")cancelName();
+});
+
+// ── calibrate ──────────────────────────────────────────
+function finishCalib(){
+  const dist=parseFloat(document.getElementById("calib-input").value);
+  if(!dist||dist<=0){alert("ระยะต้องมากกว่า 0");return;}
+  if(calibPts.length<2){cancelCalib();return;}
+  const dx=(calibPts[1].x-calibPts[0].x)/RS,dy=(calibPts[1].y-calibPts[0].y)/RS;
+  const ppm=Math.hypot(dx,dy)/dist;
+  const N=Math.round(1000*(72/25.4)/ppm);
+  const sc={N,label:`★ 1:${N} (สอบเทียบ)`,pts_per_m:ppm,calibrated:true,source:"manual",verified:true};
+  if(!pageData)pageData={};
+  pageData.scale=sc;
+  getStore(curPage).calibScale=sc;
+  updateAnalyseUI(pageData);
+  calibPanel.style.display="none"; calibPts=[];
+  setMode("dist");
+  setStatus(`✅ 1:${N} สอบเทียบแล้ว`);
+  updatePageSummary(curPage);
+  redraw();
+}
+function cancelCalib(){calibPts=[];calibPanel.style.display="none";setMode("pan");}
+
+// ── mouse move ─────────────────────────────────────────
+let rafId=null;
+function handleMouseMove(e){
+  if(isPan){panX+=e.clientX-lastMx;panY+=e.clientY-lastMy;lastMx=e.clientX;lastMy=e.clientY;applyT();return;}
+
+  // select+drag
+  if(mode==="sel"){
+    const {x:cx,y:cy}=cXY(e);
+    if(dragState){
+      const cur=cToPdf(cx,cy);
+      const dx=cur.x-dragState.startPdf.x, dy=cur.y-dragState.startPdf.y;
+      if(dragState.type==="line"){
+        const o=dragState.origData;
+        mLines[dragState.idx].x0=o.x0+dx; mLines[dragState.idx].y0=o.y0+dy;
+        mLines[dragState.idx].x1=o.x1+dx; mLines[dragState.idx].y1=o.y1+dy;
+      }else{
+        mPolys[dragState.idx].pts=dragState.origData.map(p=>({x:p.x+dx,y:p.y+dy}));
+      }
+      redraw();
+    }else{
+      // hover cursor
+      ws.style.cursor=hitTest(cx,cy)?"move":"default";
+    }
+    return;
+  }
+
+  if(mode==="pan"||!pageData){
+    snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;return;
+  }
+  const {x,y}=cXY(e);
+  const s=snap(x,y);
+  snapTarget=s;
+  const wsR=ws.getBoundingClientRect();
+  const scx=s.x*zoom+panX+wsR.left;
+  const scy=s.y*zoom+panY+wsR.top;
+  snapCur.style.left=scx+"px"; snapCur.style.top=scy+"px";
+  snapCur.style.display="block";
+  const col=s.t?SNAP_COLORS[s.t]:"#aaa";
+  snapCur.style.borderColor=col;
+  snapCur.style.boxShadow=`0 0 6px ${col}66`;
+  if(s.t){
+    snapLbl.textContent=SNAP_LABELS[s.t];
+    snapLbl.style.color=col;
+    snapLbl.style.left=(scx+10)+"px";
+    snapLbl.style.top=(scy-8)+"px";
+    snapLbl.style.display="block";
+  }else{
+    snapLbl.style.display="none";
+  }
+  redraw();
+});
+ws.addEventListener("mousemove",e=>{
+  if(rafId) return;
+  rafId=requestAnimationFrame(()=>{rafId=null;handleMouseMove(e);});
+});
+ws.addEventListener("mouseup",()=>{
+  if(dragState){pushUndo();saveCurrentPage();}
+  isPan=false;
+  dragState=null;
+  ws.style.cursor=spaceDown?"grab":mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
+});
+ws.addEventListener("mouseleave",()=>{
+  isPan=false;dragState=null;snapCur.style.display="none";snapLbl.style.display="none";snapTarget=null;
+});
+ws.addEventListener("dblclick",e=>{
+  if(mode!=="sel")return;
+  const {x:cx,y:cy}=cXY(e);
+  const hit=hitTest(cx,cy);
+  if(!hit)return;
+  selItem=hit;
+  if(hit.type==="poly"){
+    const poly=mPolys[hit.idx];
+    openNamePanel("เปลี่ยนชื่อ",(nm,at)=>{poly.name=nm;if(at)poly.areaType=at;updatePageSummary(curPage);redraw();},
+      poly.name, true);
+  }
+});
+ws.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=ws.getBoundingClientRect(),fx=e.clientX-r.left,fy=e.clientY-r.top;
+  const dz=e.deltaY>0?0.85:1.18,nz=Math.max(0.08,Math.min(8,zoom*dz));
+  panX=fx-(fx-panX)*(nz/zoom); panY=fy-(fy-panY)*(nz/zoom); zoom=nz; applyT();
+},{passive:false});
+
+// ── mode ───────────────────────────────────────────────
+function setMode(m){
+  mode=m; mPts=[]; snapTarget=null;
+  snapCur.style.display="none"; snapLbl.style.display="none";
+  if(m!=="calib"){calibPts=[];calibPanel.style.display="none";}
+  ["pan","sel","dist","area","calib"].forEach(k=>{
+    document.getElementById("btn-"+k)?.classList.toggle("active",m===k);
+  });
+  document.getElementById("lbl-mode").textContent=
+    {pan:"Pan ✋",sel:"↖ เลือก",dist:"วัดระยะ 📏",area:"วัดพื้นที่ ⬡",calib:"📐 สอบเทียบ"}[m]||m;
+  ws.className=(m==="pan"||m==="sel")?"":"drawing";
+  ws.style.cursor=m==="sel"?"default":m==="pan"?"grab":"crosshair";
+  if(m!=="sel"){selItem=null;dragState=null;}
+  document.getElementById("measure-result").textContent="";
+  if(m==="calib")setStatus("คลิกจุดที่ 1…");
+  redraw();
+}
+function clearMeasures(){
+  mPts=[];mLines=[];mPolys=[];mOpenings=[];calibPts=[];
+  calibPanel.style.display="none";
+  document.getElementById("measure-result").textContent="";
+  updatePageSummary(curPage);
+  redraw();
+}
+
+function togglePerp(){
+  perpMode=!perpMode;
+  document.getElementById("btn-perp").classList.toggle("active",perpMode);
+  setStatus(perpMode?"⊥ ตั้งฉาก: เปิด — คลิกเส้นแล้วจุดถัดไปจะตั้งฉากอัตโนมัติ":"⊥ ตั้งฉาก: ปิด");
+}
+function toggleOpening(){
+  perpMode=false;
+  document.getElementById("btn-perp").classList.remove("active");
+  document.getElementById("btn-opening").classList.toggle("active");
+  setStatus(document.getElementById("btn-opening").classList.contains("active")?"🕳 ช่องว่าง: เปิด — วาด polygon ช่องว่างเพื่อหักจากพื้นที่รวม":"🕳 ช่องว่าง: ปิด");
+}
+
+// ── export ─────────────────────────────────────────────
+function buildRows(){
+  saveCurrentPage();
+  const rows=[];
+  for(const [pg,data] of Object.entries(pageStore)){
+    const pgNum=+pg;
+    const scale=getScaleForPage(pgNum);
+    const scl=scaleLabel(scale);
+    for(const l of (data.lines||[])){
+      const metrics=lineMetrics(l, pgNum);
+      rows.push({หน้า:+pg,ประเภท:"ระยะ",ชื่อ:"",
+        ค่า:metrics.dist!=null?+metrics.dist.toFixed(4):+metrics.ptDist.toFixed(4),
+        หน่วย:metrics.dist!=null?"ม.":"pt","ไร่-งาน-วา":"",scale:scl,
+        scale_source:scale?.source||"-", scale_verified:!!scale?.verified});
+    }
+    for(const p of (data.polys||[])){
+      if(!p.closed)continue;
+      const metrics=polyMetrics(p, pgNum);
+      rows.push({หน้า:+pg,ประเภท:"พื้นที่",ชื่อ:p.name||"",
+        ค่า:metrics.area!=null?+metrics.area.toFixed(4):null,
+        หน่วย:"ตร.ม.","ไร่-งาน-วา":p.areaType==="land"?toRNW(metrics.area):"",
+        scale:scl, area_type:p.areaType||"room",
+        scale_source:scale?.source||"-", scale_verified:!!scale?.verified});
+    }
+    for(const op of (data.openings||[])){
+      if(!op.closed)continue;
+      const area=polyAreaM2(op.pts);
+      rows.push({หน้า:+pg,ประเภท:"ช่องว่าง",ชื่อ:op.name||"",
+        ค่า:area!=null?+area.toFixed(4):null,
+        หน่วย:"ตร.ม.","ไร่-งาน-วา":"",scale:scl,
+        scale_source:scale?.source||"-", scale_verified:!!scale?.verified});
+    }
+  }
+  return rows.sort((a,b)=>a.หน้า-b.หน้า);
+}
+function exportJSON(){
+  const rows=buildRows();
+  if(!rows.length){alert("ยังไม่มีข้อมูล");return;}
+  dlBlob(new Blob([JSON.stringify({measurements:rows},null,2)],
+    {type:"application/json"}),"measurements.json");
+}
+function exportCSV(){
+  const rows=buildRows();
+  if(!rows.length){alert("ยังไม่มีข้อมูล");return;}
+  const cols=["หน้า","ประเภท","ชื่อ","ค่า","หน่วย","ไร่-งาน-วา","scale","scale_source","scale_verified","area_type"];
+  const esc=v=>{
+    const s=String(v??"").replace(/"/g,'""');
+    return /[",\r\n]/.test(s)?`"${s}"`:s;
+  };
+  const csv="\uFEFF"+[cols.join(","),
+    ...rows.map(r=>cols.map(c=>esc(r[c])).join(","))].join("\r\n");
+  dlBlob(new Blob([csv],{type:"text/csv;charset=utf-8"}),"measurements.csv");
+}
+function dlBlob(blob,name){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+async function exportXLSX(){
+  if(!totalPages){alert("เปิด PDF ก่อน");return;}
+  saveCurrentPage();
+  const scales={};
+  for(const [pgStr] of Object.entries(pageStore)){
+    const pg=parseInt(pgStr);
+    const sc=getScaleForPage(pg);
+    scales[pgStr]=sc?{label:scaleLabel(sc),pts_per_m:sc.pts_per_m}:null;
+  }
+  const body={
+    case_id:currentCaseId,
+    pageStore, pageTags, pageNames, pageScales:scales,
+    pdfName:currentFileName
+  };
+  setStatus("กำลัง export XLSX…");
+  const r=await fetch("/export-xlsx",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){
+    const d=await r.json().catch(()=>({}));
+    setStatus("export XLSX ล้มเหลว: "+(d.error||""));
+    if(r.status===501) alert("ติดตั้ง xlsxwriter ก่อน: pip install xlsxwriter");
+    return;
+  }
+  const blob=await r.blob();
+  const safe=currentFileName.replace(/\.pdf$/i,"");
+  dlBlob(blob,(safe||"export")+"_report.xlsx");
+  setStatus("✅ export XLSX แล้ว");
+}
+
+// ── check engine ───────────────────────────────────────
+function collectAreas(){
+  saveCurrentPage();
+  let landArea=0, buildingOnSite=0, totalGFA=0, totalOpenings=0;
+  const gfaPages=[];
+  for(const [pgStr,store] of Object.entries(pageStore)){
+    const pg=parseInt(pgStr);
+    const tag=pageTags[pg]||'';
+    for(const poly of (store.polys||[])){
+      if(!poly.closed) continue;
+      const m=polyMetrics(poly,pg);
+      if(!m.area||m.area<=0) continue;
+      if(tag==='site'){
+        if(poly.areaType==='land') landArea+=m.area;
+        else buildingOnSite+=m.area;
+      } else if(tag==='plan'){
+        totalGFA+=m.area;
+        const existing=gfaPages.find(r=>r.pg===pg);
+        if(existing) existing.area+=m.area;
+        else gfaPages.push({pg,area:m.area});
+      }
+    }
+    for(const op of (store.openings||[])){
+      if(!op.closed) continue;
+      const area=polyAreaM2(op.pts);
+      if(area&&area>0) totalOpenings+=area;
+    }
+  }
+  const gfaSource=totalGFA>0?`polygon (${gfaPages.length} หน้า)`:'กรอกเอง';
+  if(totalGFA===0&&projectInfo.gfa>0) totalGFA=projectInfo.gfa;
+  const netGFA=Math.max(0,totalGFA-totalOpenings);
+  // open space = land - building footprint on site
+  const openArea=Math.max(0, landArea-buildingOnSite);
+  return {landArea,buildingOnSite,openArea,totalGFA,totalOpenings,netGFA,gfaSource,gfaPages};
+}
+
+// setback rules ฉ.55
+function reqFrontSetback(roadW){
+  if(roadW<=0) return 0;
+  if(roadW<6)  return 0;
+  if(roadW<10) return 2.0;
+  return Math.max(1.0, roadW/10);
+}
+function reqSideSetback(h){
+  if(h<=8)  return 0;     // ฉ.55 ไม่กำหนดถ้า ≤2ชั้น/≤8ม. กับที่ดินเปล่า
+  if(h<=15) return 2.0;
+  return 3.0;
+}
+
+function runCheck(){
+  const {landArea,buildingOnSite,openArea,totalGFA,gfaSource,gfaPages}=collectAreas();
+  const results=[];
+  const zone=ZONE_RULES[projectInfo.zone];
+  const roadW=projectInfo.roadWidth||0;
+  const h=projectInfo.buildingHeight||0;
+  const setFront=projectInfo.roadLeft||0;
+  const setSide =projectInfo.roadRight||0;
+  const setBack =projectInfo.roadBack||0;
+
+  // FAR
+  if(!zone){
+    results.push({name:'FAR',pass:null,detail:'ยังไม่ได้เลือกโซนผังเมือง'});
+  } else if(landArea<=0){
+    results.push({name:'FAR',pass:null,detail:'ยังไม่มี polygon ที่ดิน (areaType=land) บนหน้า site'});
+  } else if(totalGFA<=0){
+    results.push({name:'FAR',pass:null,detail:'ยังไม่มีพื้นที่ GFA — วาด polygon บนหน้า plan หรือกรอก GFA ใน Setup'});
+  } else {
+    const far=totalGFA/landArea;
+    results.push({
+      name:'FAR',value:far.toFixed(2),limit:`≤ ${zone.far}`,
+      ref:'ผังเมือง กทม. 2556',pass:far<=zone.far,
+      detail:`GFA ${totalGFA.toFixed(1)} ÷ ที่ดิน ${landArea.toFixed(1)} ตร.ม. (${gfaSource})`
+    });
+  }
+
+  // OSR
+  if(!zone){
+    results.push({name:'OSR',pass:null,detail:'ยังไม่ได้เลือกโซนผังเมือง'});
+  } else if(landArea<=0||buildingOnSite<=0){
+    results.push({name:'OSR',pass:null,detail:'ยังไม่มี polygon ที่ดิน + อาคาร บนหน้า site'});
+  } else if(totalGFA<=0){
+    results.push({name:'OSR',pass:null,detail:'ยังไม่มี GFA'});
+  } else {
+    const osr=(openArea/totalGFA)*100;
+    results.push({
+      name:'OSR',value:osr.toFixed(1)+'%',limit:`≥ ${zone.osr}%`,
+      ref:'ผังเมือง กทม. 2556',pass:osr>=zone.osr,
+      detail:`ที่ว่าง ${openArea.toFixed(1)} ตร.ม. (ที่ดิน ${landArea.toFixed(1)} − อาคาร ${buildingOnSite.toFixed(1)}) ÷ GFA ${totalGFA.toFixed(1)} × 100`
+    });
+  }
+
+  // ระยะร่นด้านถนน ฉ.55 ข้อ 41
+  if(roadW>0){
+    const req=reqFrontSetback(roadW);
+    if(setFront<=0){
+      results.push({name:'ระยะร่นด้านถนน',pass:null,
+        detail:`ถนน ${roadW} ม. → ต้องร่น ≥ ${req.toFixed(1)} ม. — ยังไม่ได้กรอกค่าระยะร่นด้านหน้า`});
+    } else {
+      results.push({
+        name:'ระยะร่นด้านถนน',value:setFront.toFixed(2)+' ม.',limit:`≥ ${req.toFixed(1)} ม.`,
+        ref:'ฉ.55 ข้อ 41',pass:setFront>=req,
+        detail:`ถนนกว้าง ${roadW} ม.`
+      });
+    }
+  }
+
+  // ระยะร่นด้านข้าง/หลัง ฉ.55 ข้อ 50
+  if(h>0){
+    const reqS=reqSideSetback(h);
+    if(reqS>0){
+      if(setSide>0){
+        results.push({
+          name:'ระยะร่นด้านข้าง',value:setSide.toFixed(2)+' ม.',limit:`≥ ${reqS.toFixed(1)} ม.`,
+          ref:'ฉ.55 ข้อ 50',pass:setSide>=reqS,
+          detail:`ความสูงอาคาร ${h} ม.`
+        });
+      } else {
+        results.push({name:'ระยะร่นด้านข้าง',pass:null,detail:`ความสูง ${h} ม. → ต้องร่น ≥ ${reqS.toFixed(1)} ม. — ยังไม่ได้กรอกค่า`});
+      }
+      if(setBack>0){
+        results.push({
+          name:'ระยะร่นด้านหลัง',value:setBack.toFixed(2)+' ม.',limit:`≥ ${reqS.toFixed(1)} ม.`,
+          ref:'ฉ.55 ข้อ 50',pass:setBack>=reqS,
+          detail:`ความสูงอาคาร ${h} ม.`
+        });
+      } else {
+        results.push({name:'ระยะร่นด้านหลัง',pass:null,detail:`ความสูง ${h} ม. → ต้องร่น ≥ ${reqS.toFixed(1)} ม. — ยังไม่ได้กรอกค่า`});
+      }
+    }
+  }
+
+  // ความสูง ≤ 2×(ร่น+ถนน) ฉ.55 ข้อ 44
+  if(h>0&&roadW>0&&setFront>0){
+    const maxH=2*(setFront+roadW);
+    results.push({
+      name:'ความสูงอาคาร vs ระยะร่น',value:h.toFixed(1)+' ม.',limit:`≤ ${maxH.toFixed(1)} ม.`,
+      ref:'ฉ.55 ข้อ 44',pass:h<=maxH,
+      detail:`H ≤ 2 × (ร่น ${setFront} + ถนน ${roadW}) = ${maxH.toFixed(1)} ม.`
+    });
+  }
+
+  return {results,landArea,buildingOnSite,openArea,totalGFA,gfaSource,gfaPages};
+}
+
+function syncProjectInfoFromForm(){
+  projectInfo={
+    reqNo:         document.getElementById("pi-reqno").value.trim(),
+    zone:          document.getElementById("pi-zone").value,
+    buildingType:  document.getElementById("pi-btype").value,
+    workType:      document.getElementById("pi-worktype").value,
+    buildingHeight:parseFloat(document.getElementById("pi-height").value)||0,
+    floors:        parseInt(document.getElementById("pi-floors").value)||0,
+    gfa:           parseFloat(document.getElementById("pi-gfa").value)||0,
+    units:         parseInt(document.getElementById("pi-units").value)||0,
+    roadWidth:     parseFloat(document.getElementById("pi-road").value)||0,
+    roadLeft:      parseFloat(document.getElementById("pi-road-l").value)||0,
+    roadRight:     parseFloat(document.getElementById("pi-road-r").value)||0,
+    roadBack:      parseFloat(document.getElementById("pi-road-b").value)||0,
+  };
+}
+
+function openCheckPanel(){
+  if(!totalPages){alert('เปิด PDF ก่อน');return;}
+  syncProjectInfoFromForm();
+  const {results,landArea,buildingOnSite,openArea,totalGFA,gfaSource,gfaPages}=runCheck();
+  const panel=document.getElementById('check-panel');
+  const body =document.getElementById('check-body');
+
+  const nPass=results.filter(r=>r.pass===true).length;
+  const nFail=results.filter(r=>r.pass===false).length;
+  const nUnk =results.filter(r=>r.pass===null).length;
+
+  // warnings
+  let warns='';
+  if(!projectInfo.zone) warns+='<div class="cd-warn">⚠ ยังไม่ได้เลือกโซนผังเมือง — กด ⚙ Setup เพื่อกรอก</div>';
+  if(totalGFA===0)      warns+='<div class="cd-warn">⚠ ยังไม่มี GFA — วาด polygon บนหน้าที่ tag=plan หรือกรอกใน Setup</div>';
+  if(landArea===0)      warns+='<div class="cd-warn">⚠ ยังไม่มีพื้นที่ที่ดิน — วาด polygon (areaType=land) บนหน้า site</div>';
+
+  let html=`${warns}
+  <div class="check-summary">
+    <span class="cs-pass">✅ ผ่าน ${nPass}</span>
+    <span class="cs-fail">❌ ไม่ผ่าน ${nFail}</span>
+    <span class="cs-unk">⚪ ขาดข้อมูล ${nUnk}</span>
+  </div>
+  <table class="check-table">
+    <tr><th>รายการ</th><th>ค่าที่วัด</th><th>เกณฑ์</th><th>อ้างอิง</th><th></th></tr>`;
+
+  for(const r of results){
+    const icon=r.pass===true?'✅':r.pass===false?'❌':'⚪';
+    const cls =r.pass===true?'pass':r.pass===false?'fail':'unk';
+    html+=`<tr class="${cls}">
+      <td><b>${r.name}</b><br><small>${r.detail||''}</small></td>
+      <td>${r.value||'—'}</td>
+      <td>${r.limit||'—'}</td>
+      <td><small>${r.ref||''}</small></td>
+      <td class="result-icon">${icon}</td>
+    </tr>`;
+  }
+  if(!results.length){
+    html+='<tr><td colspan="5" style="text-align:center;padding:20px;color:#636366">กรอกข้อมูลใน Setup แล้วลองใหม่</td></tr>';
+  }
+  html+='</table>';
+
+  // data summary
+  html+=`<div class="check-data"><h4>ข้อมูลที่รวบรวมได้</h4>
+    <div class="cd-row"><span>พื้นที่ที่ดิน</span><span>${landArea>0?landArea.toFixed(2)+' ตร.ม.':'—'}</span></div>
+    <div class="cd-row"><span>อาคาร (footprint)</span><span>${buildingOnSite>0?buildingOnSite.toFixed(2)+' ตร.ม.':'—'}</span></div>
+    <div class="cd-row"><span>ที่ว่าง (ที่ดิน−อาคาร)</span><span>${landArea>0&&buildingOnSite>0?openArea.toFixed(2)+' ตร.ม.':'—'}</span></div>
+    <div class="cd-row"><span>GFA รวม (${gfaSource})</span><span>${totalGFA>0?totalGFA.toFixed(2)+' ตร.ม.':'—'}</span></div>
+    ${gfaPages.length?'<div class="cd-row"><span>หน้า plan</span><span>'+gfaPages.map(g=>`หน้า ${g.pg}: ${g.area.toFixed(1)} ตร.ม.`).join(', ')+'</span></div>':''}
+    <div class="cd-row"><span>โซน</span><span>${projectInfo.zone||'—'}</span></div>
+    <div class="cd-row"><span>ถนนกว้าง</span><span>${projectInfo.roadWidth>0?projectInfo.roadWidth+' ม.':'—'}</span></div>
+    <div class="cd-row"><span>ความสูงอาคาร</span><span>${projectInfo.buildingHeight>0?projectInfo.buildingHeight+' ม.':'—'}</span></div>
+  </div>`;
+
+  body.innerHTML=html;
+  panel.classList.add('open');
+}
+
+function closeCheckPanel(){
+  document.getElementById('check-panel').classList.remove('open');
+}
+
+// ── keyboard ───────────────────────────────────────────
+document.addEventListener("keydown",e=>{
+  if(e.key===" "&&!spaceDown&&e.target.tagName!=="INPUT"){
+    e.preventDefault();
+    spaceDown=true; preSpaceMode=mode;
+    ws.style.cursor="grab"; return;
+  }
+  if(e.target.tagName==="INPUT")return;
+  if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();undo();return;}
+  if(e.key==="ArrowRight"){ const n=getNextPage(curPage); if(n) loadPage(n); }
+  if(e.key==="ArrowLeft"){ const p=getPrevPage(curPage); if(p) loadPage(p); }
+  if(e.key==="Escape"){
+    setMode("pan");
+    namePanel.style.display="none";
+    ctxMenu.style.display="none";
+    closePgMgr();
+  }
+  if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){
+    pushUndo();
+    if(selItem.type==="line") mLines.splice(selItem.idx,1);
+    else mPolys.splice(selItem.idx,1);
+    selItem=null;dragState=null;redraw();
+  }
+  if(e.key==="f"||e.key==="F")fitToWindow();
+  if(e.key==="Delete"&&ctxTarget)ctxDelete();
+});
+document.addEventListener("keyup",e=>{
+  if(e.key===" "&&spaceDown){
+    spaceDown=false;
+    ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";
+  }
+});
+function setStatus(t){document.getElementById("status").textContent=t;}
+window.addEventListener("resize",()=>{if(bgImg)fitToWindow();});
+
+// ── page manager ───────────────────────────────────────
+function openPageManager(){
+  if(!totalPages){alert("เปิด PDF ก่อน");return;}
+  const overlay=document.getElementById("pgmgr-overlay");
+  const grid=document.getElementById("pgmgr-grid");
+  grid.innerHTML="";
+  if(!pgmgrSel.size){for(let i=1;i<=totalPages;i++) if(!excludedPages.has(i)) pgmgrSel.add(i);}
+  for(let i=1;i<=totalPages;i++){
+    if(excludedPages.has(i)) continue;
+    const cell=document.createElement("div");
+    cell.className="pgmgr-cell"+(pgmgrSel.has(i)?" sel":"");
+    cell.dataset.page=i;
+    cell.innerHTML=`<img src="${thumbUrl(i,false)}" loading="lazy"><span>หน้า ${i}</span>`;
+    cell.addEventListener("click",e=>pgmgrClickCell(i,e));
+    grid.appendChild(cell);
+  }
+  pgmgrUpdateInfo();
+  overlay.classList.add("open");
+}
+function closePgMgr(){
+  document.getElementById("pgmgr-overlay").classList.remove("open");
+}
+function pgmgrClickCell(i,e){
+  if(e.shiftKey&&pgmgrLastClick!=null){
+    const lo=Math.min(pgmgrLastClick,i), hi=Math.max(pgmgrLastClick,i);
+    // Find if all in range are currently selected
+    const range=[]; for(let p=lo;p<=hi;p++) if(!excludedPages.has(p)) range.push(p);
+    const allSel=range.every(p=>pgmgrSel.has(p));
+    for(const p of range) allSel?pgmgrSel.delete(p):pgmgrSel.add(p);
+  }else{
+    if(!excludedPages.has(i)) pgmgrSel.has(i)?pgmgrSel.delete(i):pgmgrSel.add(i);
+  }
+  pgmgrLastClick=i;
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>{
+    c.classList.toggle("sel",pgmgrSel.has(+c.dataset.page));
+  });
+  pgmgrUpdateInfo();
+}
+function pgmgrSelectAll(){
+  pgmgrSel.clear();
+  for(let i=1;i<=totalPages;i++) if(!excludedPages.has(i)) pgmgrSel.add(i);
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.add("sel"));
+  pgmgrUpdateInfo();
+}
+function pgmgrClearAll(){
+  pgmgrSel.clear();
+  document.querySelectorAll(".pgmgr-cell").forEach(c=>c.classList.remove("sel"));
+  pgmgrUpdateInfo();
+}
+function pgmgrUpdateInfo(){
+  const validTotal=totalPages-excludedPages.size;
+  document.getElementById("pgmgr-sel-info").textContent=`เลือก ${pgmgrSel.size} / ${validTotal} หน้า`;
+}
+async function pgmgrExportPDF(withAnnotations){
+  if(!pgmgrSel.size){alert("เลือกหน้าก่อน");return;}
+  const pages=[...pgmgrSel].sort((a,b)=>a-b);
+  saveCurrentPage();
+  const body={case_id:currentCaseId,pages, pdfName:currentFileName, rotations:pageRotations};
+  if(withAnnotations) body.annotations=pageStore;
+  setStatus("กำลัง export…");
+  const r=await fetch("/export-pdf",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){setStatus("export ล้มเหลว");return;}
+  const blob=await r.blob();
+  const safe=currentFileName.replace(/\.pdf$/i,"");
+  dlBlob(blob,(safe||"export")+`_p${pages.join("-")}.pdf`);
+  setStatus(`✅ export ${pages.length} หน้า`);
+}
+
+// ── save / load project ────────────────────────────────
+function saveProject(){
+  if(!totalPages){alert("เปิด PDF ก่อน");return;}
+  saveCurrentPage();
+  const proj={version:1,pdfName:currentFileName,totalPages,
+              pageStore,pageRotations,pageTags,pageNames,projectInfo,
+              excludedPages:[...excludedPages]};
+  const safe=currentFileName.replace(/\.pdf$/i,"")||"project";
+  dlBlob(new Blob([JSON.stringify(proj,null,2)],{type:"application/json"}),safe+".bmaplan");
+  setStatus("💾 บันทึกแล้ว");
+}
+document.getElementById("proj-input").addEventListener("change",async e=>{
+  const file=e.target.files[0]; if(!file)return;
+  e.target.value="";
+  try{
+    const text=await file.text();
+    const proj=JSON.parse(text);
+    if(proj.version!==1)throw new Error("version ไม่รองรับ");
+    if(proj.pdfName&&currentFileName&&proj.pdfName!==currentFileName)
+      throw new Error("ไฟล์โปรเจกต์ไม่ตรงกับ PDF ปัจจุบัน");
+    if(proj.totalPages&&totalPages&&proj.totalPages!==totalPages)
+      throw new Error("จำนวนหน้าไม่ตรงกับ PDF ปัจจุบัน");
+    pageStore=proj.pageStore||{};
+    pageRotations=proj.pageRotations||{};
+    pageTags=proj.pageTags||{};
+    pageNames=proj.pageNames||{};
+    projectInfo=proj.projectInfo||{};
+    excludedPages=new Set(proj.excludedPages||[]);
+    restorePage(curPage);
+    for(let i=1;i<=totalPages;i++){updateThumbTag(i);}
+    for(let i=1;i<=totalPages;i++){
+      const th=document.getElementById("th-"+i);
+      if(th) th.classList.toggle("excluded",excludedPages.has(i));
+    }
+    refreshThumbImage(curPage);
+    redraw();
+    setStatus("📂 โหลด "+file.name+" แล้ว");
+  }catch(err){alert("โหลดไม่ได้: "+err.message);}
+});
+// ── setup overlay ──────────────────────────────────────
+function openSetup(){
+  document.getElementById("setup-pdf-name").textContent=currentFileName||"";
+  buildTagGrid();
+  document.getElementById("pi-reqno").value=projectInfo.reqNo||"";
+  document.getElementById("pi-zone").value=projectInfo.zone||"";
+  document.getElementById("pi-btype").value=projectInfo.buildingType||"";
+  document.getElementById("pi-worktype").value=projectInfo.workType||"new";
+  document.getElementById("pi-height").value=projectInfo.buildingHeight||"";
+  document.getElementById("pi-floors").value=projectInfo.floors||"";
+  document.getElementById("pi-gfa").value=projectInfo.gfa||"";
+  document.getElementById("pi-units").value=projectInfo.units||"";
+  document.getElementById("pi-road").value=projectInfo.roadWidth||"";
+  document.getElementById("pi-road-l").value=projectInfo.roadLeft||"";
+  document.getElementById("pi-road-r").value=projectInfo.roadRight||"";
+  document.getElementById("pi-road-b").value=projectInfo.roadBack||"";
+  document.getElementById("setup-overlay").classList.add("open");
+}
+function buildTagGrid(){
+  const grid=document.getElementById("tag-grid");
+  grid.innerHTML="";
+  for(let i=1;i<=totalPages;i++){
+    const cell=document.createElement("div");
+    const excl=excludedPages.has(i);
+    cell.className="tag-cell"+(excl?" excluded":"");
+    cell.id="tc-"+i;
+    const optHtml=TAG_OPTIONS.map(o=>`<option value="${o.value}"${(pageTags[i]||"")==o.value?" selected":""}>${o.label}</option>`).join("");
+    const pgName=pageNames[i]||"";
+    cell.innerHTML=`<button class="tc-del-btn${excl?" on":""}" title="${excl?"คืนหน้า":"ซ่อน/ลบหน้านี้"}" onclick="toggleExcludePage(${i})">x</button>`
+      +`<img src="${thumbUrl(i,true)}" loading="lazy"><span class="tc-lbl">หน้า ${i}</span>`
+      +`<input type="text" placeholder="ชื่อชั้น/หน้า" value="${pgName}" onchange="setPageName(${i},this.value)"${excl?" disabled":""} style="width:100%;background:#1c1c1e;border:1px solid #3a3a3c;border-radius:4px;color:#e5e5e7;padding:2px 4px;font-size:9px;">`
+      +`<select onchange="setPageTag(${i},this.value)"${excl?" disabled":""}>${optHtml}</select>`;
+    grid.appendChild(cell);
+  }
+}
+function setPageName(n,val){
+  pageNames[n]=val.trim();
+}
+function setPageTag(n,val){
+  pageTags[n]=val;
+  updateThumbTag(n);
+}
+function toggleExcludePage(n){
+  if(excludedPages.has(n)) excludedPages.delete(n);
+  else excludedPages.add(n);
+  // อัปเดต tag-cell ใน setup grid
+  const cell=document.getElementById("tc-"+n);
+  if(cell){
+    const excl=excludedPages.has(n);
+    cell.className="tag-cell"+(excl?" excluded":"");
+    const btn=cell.querySelector(".tc-del-btn");
+    if(btn){btn.className="tc-del-btn"+(excl?" on":"");btn.title=excl?"คืนหน้า":"ซ่อน/ลบหน้านี้";}
+    const sel=cell.querySelector("select");
+    if(sel) sel.disabled=excl;
+  }
+  // อัปเดต thumb strip
+  const th=document.getElementById("th-"+n);
+  if(th) th.classList.toggle("excluded",excludedPages.has(n));
+}
+async function startCheck(){
+  projectInfo={
+    reqNo:         document.getElementById("pi-reqno").value.trim(),
+    zone:          document.getElementById("pi-zone").value,
+    buildingType:  document.getElementById("pi-btype").value,
+    workType:      document.getElementById("pi-worktype").value,
+    buildingHeight:parseFloat(document.getElementById("pi-height").value)||0,
+    floors:        parseInt(document.getElementById("pi-floors").value)||0,
+    gfa:           parseFloat(document.getElementById("pi-gfa").value)||0,
+    units:         parseInt(document.getElementById("pi-units").value)||0,
+    roadWidth:     parseFloat(document.getElementById("pi-road").value)||0,
+    roadLeft:      parseFloat(document.getElementById("pi-road-l").value)||0,
+    roadRight:     parseFloat(document.getElementById("pi-road-r").value)||0,
+    roadBack:      parseFloat(document.getElementById("pi-road-b").value)||0,
+  };
+  await fetch("/project",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({case_id:currentCaseId,page_tags:pageTags,project_info:projectInfo})});
+  for(let i=1;i<=totalPages;i++){
+    updateThumbTag(i);
+    const th=document.getElementById("th-"+i);
+    if(th) th.classList.toggle("excluded",excludedPages.has(i));
+  }
+  document.getElementById("setup-overlay").classList.remove("open");
+  const sitePage=Object.entries(pageTags).find(([,v])=>v==="site");
+  let target=sitePage?parseInt(sitePage[0]):1;
+  if(excludedPages.has(target)) target=getNextPage(0)||target;
+  await loadPage(target);
+  const z=ZONE_RULES[projectInfo.zone];
+  if(z) setStatus(`โซน ${projectInfo.zone} — FAR ≤ ${z.far}  OSR ≥ ${z.osr}%`);
+}
+</script>
+</body>
+</html>"""
+
+@app.get("/")
+def root():
+    return HTMLResponse(HTML)
+
+if __name__=="__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")

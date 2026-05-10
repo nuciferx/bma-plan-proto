@@ -309,6 +309,88 @@ let selItem=null,dragState=null,undoStack=[],redoStack=[],showRefDistances=false
 let lSidebarMode="sheets",inspPanelCollapsed=false;
 let spaceDown=false,preSpaceMode="pan",shiftDown=false;
 let layerVis={base_area:true,sub_area:true,deduction:true,reference_geometry:true,labels:true};let layerLock={base_area:false,sub_area:false,deduction:false,reference_geometry:false};let orthoMode=false;
+// ── Page-Scoped Layer Model ──────────────────────────────────────
+const DEFAULT_LAYER_PRESETS={
+  plan:[
+    {slug:"base_area",      name:"พื้นที่หลัก",   color:"#30d158", order:1},
+    {slug:"sub_area",       name:"พื้นที่ย่อย",    color:"#0a84ff", order:2},
+    {slug:"deduction",      name:"ช่องว่าง",       color:"#ff453a", order:3},
+    {slug:"reference_geometry",name:"เส้นอ้างอิง",color:"#ffd60a", order:4},
+    {slug:"labels",         name:"ป้าย",           color:"#8e8e93", order:5},
+  ],
+  site:[
+    {slug:"site_boundary",  name:"ที่ดิน/แนวเขต",          color:"#30d158", order:1},
+    {slug:"base_area",      name:"กรอบอาคาร/แนวอาคาร",     color:"#0a84ff", order:2},
+    {slug:"deduction",      name:"ที่ว่าง",                 color:"#ff453a", order:3},
+    {slug:"reference_geometry",name:"เส้นอ้างอิง",         color:"#ffd60a", order:4},
+    {slug:"labels",         name:"ป้าย/หมายเหตุ",          color:"#8e8e93", order:5},
+  ],
+  elev:[
+    {slug:"base_area",      name:"ความสูงอาคาร",            color:"#30d158", order:1},
+    {slug:"reference_geometry",name:"ระดับอ้างอิง/ระยะดิ่ง",color:"#ffd60a", order:2},
+    {slug:"labels",         name:"ป้าย/หมายเหตุ",          color:"#8e8e93", order:3},
+  ],
+  section:[
+    {slug:"base_area",      name:"ความสูงอาคาร",            color:"#30d158", order:1},
+    {slug:"deduction",      name:"ช่องเปิด/ผนังทึบ",       color:"#ff453a", order:2},
+    {slug:"reference_geometry",name:"เส้นอ้างอิง",         color:"#ffd60a", order:3},
+    {slug:"labels",         name:"ป้าย/หมายเหตุ",          color:"#8e8e93", order:4},
+  ],
+};
+DEFAULT_LAYER_PRESETS.detail  =DEFAULT_LAYER_PRESETS.plan;
+DEFAULT_LAYER_PRESETS.schedule=DEFAULT_LAYER_PRESETS.plan;
+DEFAULT_LAYER_PRESETS.other   =DEFAULT_LAYER_PRESETS.plan;
+function _makePageLayers(pageIndex){
+  const tag=pageTags[pageIndex]||"plan";
+  const defs=DEFAULT_LAYER_PRESETS[tag]||DEFAULT_LAYER_PRESETS.plan;
+  const pgKey=String(pageIndex);
+  return defs.map(d=>({
+    id:"pg"+pgKey+"_"+d.slug,
+    pageIndex:pageIndex,
+    name:d.name,
+    slug:d.slug,
+    color:d.color,
+    visible:layerVis[d.slug]!==undefined?layerVis[d.slug]:true,
+    locked:layerLock[d.slug]!==undefined?layerLock[d.slug]:false,
+    order:d.order,
+    presetKey:tag+"_default",
+    objectCount:0,
+  }));
+}
+function ensurePageLayers(pageIndex){
+  const s=getStore(pageIndex);
+  if(!s.layers||!s.layers.length)s.layers=_makePageLayers(pageIndex);
+  return s.layers;
+}
+function getCurrentPageLayers(){return ensurePageLayers(curPage);}
+function getLayerById(pageIndex,layerId){return ensurePageLayers(pageIndex).find(l=>l.id===layerId)||null;}
+function getLayerBySlug(pageIndex,slug){return ensurePageLayers(pageIndex).find(l=>l.slug===slug)||null;}
+function getActiveLayerForPage(pageIndex){
+  const layers=ensurePageLayers(pageIndex);
+  const slug=_activeSlugForPage(pageIndex);
+  return layers.find(l=>l.slug===slug)||layers[0]||null;
+}
+function _activeSlugForPage(pageIndex){return(getStore(pageIndex).activeLayerSlug)||"base_area";}
+function setActiveLayerForPage(pageIndex,slug){getStore(pageIndex).activeLayerSlug=slug;}
+function getObjectLayerSlug(obj){
+  if(obj.layerSlug)return obj.layerSlug;
+  if(obj.areaType)return areaTypeLayer(obj.areaType);
+  return"base_area";
+}
+function assignDefaultObjectLayer(pageIndex,obj){
+  if(obj.pageIndex===undefined)obj.pageIndex=pageIndex;
+  if(!obj.layerSlug)obj.layerSlug=getObjectLayerSlug(obj);
+  const layer=getLayerBySlug(pageIndex,obj.layerSlug);
+  if(layer&&!obj.layerId)obj.layerId=layer.id;
+}
+function _syncPageLayersToGlobals(pageIndex){
+  const layers=ensurePageLayers(pageIndex);
+  layers.forEach(l=>{
+    if(Object.prototype.hasOwnProperty.call(layerVis,l.slug)) layerVis[l.slug]=l.visible;
+    if(Object.prototype.hasOwnProperty.call(layerLock,l.slug))layerLock[l.slug]=l.locked;
+  });
+}
+// ── End Page-Scoped Layer Model ──────────────────────────────────
 const AREA_TYPE_LABELS={room:"ห้อง/อาคาร",building:"แนวอาคาร",land:"ที่ดิน",gfa:"GFA",non_gfa:"ไม่คิด GFA",residential_unit:"ยูนิตพักอาศัย",bedroom:"ห้องนอน",corridor:"ทางเดิน",stair:"บันได",fire_stair:"บันไดหนีไฟ",parking_area:"พื้นที่จอดรถ",service:"บริการ"};
 function areaTypeLayer(t){return(t==="land"||t==="gfa"||t==="building")?"base_area":"sub_area";}
 function polyCanvasAreaPx(cp){let a=0;for(let i=0;i<cp.length;i++){const j=(i+1)%cp.length;a+=cp[i].x*cp[j].y-cp[j].x*cp[i].y;}return Math.abs(a)/2;}
@@ -343,7 +425,7 @@ function getScaleForPage(pg){return pageStore[pg]?.calibScale||analyseCache[anal
 function getRot(n){return pageRotations[n]||0;}
 function getStore(n){if(!pageStore[n])pageStore[n]={lines:[],polys:[],openings:[],refs:[],parking:[],calibScale:null};return pageStore[n];}
 function saveCurrentPage(){normalizeCurrentObjects();const s=getStore(curPage);s.lines=[...mLines];s.polys=[...mPolys];s.openings=[...mOpenings];s.refs=[...mRefs];s.parking=[...mParking];ensureStoreObjectIds(s);if(pageData?.scale?.calibrated)s.calibScale=pageData.scale;}
-function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;updatePageSummary(n);}
+function restorePage(n){const s=getStore(n);ensureStoreObjectIds(s);mLines=[...(s.lines||[])];mPolys=[...(s.polys||[])];mOpenings=[...(s.openings||[])];mRefs=[...(s.refs||[])];mParking=[...(s.parking||[])];const key=analyseKey(n);if(s.calibScale&&analyseCache[key])analyseCache[key].scale=s.calibScale;_syncPageLayersToGlobals(n);updatePageSummary(n);}
 function getNextPage(n){for(let i=n+1;i<=totalPages;i++)if(!excludedPages.has(i))return i;return null;}
 function getPrevPage(n){for(let i=n-1;i>=1;i--)if(!excludedPages.has(i))return i;return null;}
 function setWorkflowState(id,state){const el=document.getElementById(id);if(!el)return;el.classList.toggle("done",state==="done");el.classList.toggle("warn",state==="warn");el.classList.toggle("current",state==="current");}
@@ -958,8 +1040,8 @@ function hitTest(cx,cy){const THR=12/zoom;for(let i=mParking.length-1;i>=0;i--){
 function hitTestAll(cx,cy){const THR=12/zoom;const hits=[];const seen=new Set();const addHit=(h)=>{const k=h.type+":"+h.idx;if(!seen.has(k)){seen.add(k);hits.push(h);}};for(let i=mParking.length-1;i>=0;i--){const p=mParking[i],c=pdfToC(p.x,p.y);if(Math.hypot(cx-c.x,cy-c.y)<THR)addHit({type:"parking",idx:i});}if(layerVis.reference_geometry&&!layerLock.reference_geometry)for(let i=mRefs.length-1;i>=0;i--){for(const seg of lineSegments(mRefs[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"ref",idx:i});break;}}}for(let i=mOpenings.length-1;i>=0;i--){const op=mOpenings[i];if(!op.closed||layerLock.deduction)continue;const cp=op.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)addHit({type:"opening",idx:i});}const polyHits=[];for(let i=mPolys.length-1;i>=0;i--){const poly=mPolys[i];if(!poly.closed)continue;const _pl2=areaTypeLayer(poly.areaType);if(layerLock[_pl2])continue;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)polyHits.push({type:"poly",idx:i,_area:polyCanvasAreaPx(cp)});}polyHits.sort((a,b)=>a._area-b._area);polyHits.forEach(h=>addHit(h));for(let i=mLines.length-1;i>=0;i--){for(const seg of lineSegments(mLines[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"line",idx:i});break;}}}return hits;}
 function showObjPicker(hits,ex,ey){const picker=document.getElementById("obj-picker");const rows=document.getElementById("obj-picker-rows");rows.innerHTML="";hits.forEach(hit=>{const obj=selectedObj(hit);if(!obj)return;let icon="⬡",name="",area="",typeLabel="";if(hit.type==="opening"){icon="🕳";name=obj.name||"ช่องว่าง";const a=polyAreaM2(obj.pts);area=a!=null?"−"+a.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="poly"){icon=areaTypeLayer(obj.areaType)==="base_area"?"🏗":"📐";name=obj.name||(AREA_TYPE_LABELS[obj.areaType]||"พื้นที่");typeLabel=AREA_TYPE_LABELS[obj.areaType]||"";const m=polyMetrics(obj,curPage);area=m.area!=null?m.area.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="ref"){icon="⌁";name=obj.name||(REF_LABELS&&REF_LABELS[obj.refType])||"เส้นอ้างอิง";}else if(hit.type==="parking"){icon="🚗";name=(PARKING_LABELS&&PARKING_LABELS[obj.parkingType])||"ที่จอด";}else if(hit.type==="line"){icon="📏";name="ระยะ";}const div=document.createElement("div");div.className="opkr-row";div.innerHTML=`<span class="opkr-icon">${icon}</span><span class="opkr-name">${name||"—"}</span><span class="opkr-area">${area}</span>`;div.addEventListener("click",()=>{selItem={type:hit.type,idx:hit.idx};syncColorBar(selItem);hideObjPicker();setSidebarMode("properties");redraw();buildRightPanel();setStatus(`เลือก ${icon} ${name||hit.type} idx ${hit.idx}`);});rows.appendChild(div);});const pw=240;let lx=ex+10,ly=ey+10;if(lx+pw>window.innerWidth-10)lx=ex-pw-10;if(ly+hits.length*36+44>window.innerHeight-10)ly=ey-hits.length*36-50;picker.style.left=lx+"px";picker.style.top=ly+"px";picker.style.display="block";ignoreNextObjPickerDocumentClick=true;}
 function hideObjPicker(){document.getElementById("obj-picker").style.display="none";}
-function toggleLayer(lyr){layerVis[lyr]=!layerVis[lyr];redraw();buildRightPanel();}
-function toggleLayerLock(lyr){layerLock[lyr]=!layerLock[lyr];if(selItem){const obj=selectedObj(selItem);if(obj){const lt=selItem.type==="poly"?areaTypeLayer(obj.areaType):selItem.type==="opening"?"deduction":selItem.type==="ref"?"reference_geometry":null;if(lt&&layerLock[lt]){selItem=null;dragState=null;}}}redraw();buildRightPanel();}
+function toggleLayer(lyr){layerVis[lyr]=!layerVis[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl)pl.visible=layerVis[lyr];redraw();buildRightPanel();}
+function toggleLayerLock(lyr){layerLock[lyr]=!layerLock[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl)pl.locked=layerLock[lyr];if(selItem){const obj=selectedObj(selItem);if(obj){const lt=selItem.type==="poly"?areaTypeLayer(obj.areaType):selItem.type==="opening"?"deduction":selItem.type==="ref"?"reference_geometry":null;if(lt&&layerLock[lt]){selItem=null;dragState=null;}}}redraw();buildRightPanel();}
 function toggleOrtho(){orthoMode=!orthoMode;document.getElementById("btn-ortho").classList.toggle("active",orthoMode);setStatus(orthoMode?"⊖ ตั้งฉากเสมอ: เปิด — วาดล็อก 0°/90° ตลอด":"⊖ ตั้งฉากเสมอ: ปิด");}
 function finishCurrentArea(){if(mPts.length<3){setStatus("polygon ต้องมีอย่างน้อย 3 จุด");return;}if(polySelfIntersects(mPts)){setStatus("polygon ตัดกันเอง");return;}const area=polyAreaM2(mPts);pushUndo();if(openingMode){const op={pts:[...mPts],closed:true,name:"",id:newObjectId("opening"),color:curColor,opacity:curOpacity,semanticTag:"deduction_opening",useCategory:null};linkOpeningParent(op,mPolys);mOpenings.push(op);if(area!=null)document.getElementById("measure-result").textContent=`⬡ ช่องว่าง ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อช่องว่าง",(nm)=>{op.name=nm;linkOpeningParent(op,mPolys);updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",false);}else{const at=curAType||"room";const poly={pts:[...mPts],closed:true,name:"",areaType:at,id:newObjectId("area"),color:curColor,opacity:curOpacity,semanticTag:defaultSemanticTag("poly",{areaType:at}),useCategory:null};const polyIdx=mPolys.length;mPolys.push(poly);linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(area!=null)document.getElementById("measure-result").textContent=`⬡ ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อพื้นที่",(nm,type)=>{poly.name=nm;const oldTag=poly.semanticTag;poly.areaType=type||poly.areaType||"room";const nextTag=defaultSemanticTag("poly",poly);if(oldTag===defaultSemanticTag("poly",{areaType:at}))poly.semanticTag=nextTag;normalizeSemanticFields(poly,"poly");linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(poly.areaType==="land"){ensureLandEdgeTags(poly);setTimeout(()=>openLandEdgePanel(polyIdx),0);}updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",true,at);}updatePageSummary(curPage);updateWorkspaceState();buildRightPanel();}
 function updateDrawBar(){const bar=document.getElementById("draw-bar");const inDraw=["dist","path","ref","area"].includes(mode);bar.style.display=(inDraw&&mPts.length>0)?"flex":"none";if(inDraw&&mPts.length>0){const canFinish=(mode==="path"&&mPts.length>=2)||(mode==="ref"&&mPts.length>=2)||(mode==="area"&&mPts.length>=3);document.getElementById("dbar-finish").disabled=!canFinish;document.getElementById("dbar-pts").textContent=mPts.length+" จุด";}}

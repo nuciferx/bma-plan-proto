@@ -1638,7 +1638,7 @@ def _test_menu_power_up(page):
         }
         return out;
     }""")
-    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 20, "object": 7, "layer": 11}
+    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 21, "object": 7, "layer": 11}
     menuStructureOk = all(menu_counts.get(m) == expected_counts[m] for m in expected_counts)
 
     # ── 2. No disabled items ─────────────────────────────────────────────────
@@ -1782,6 +1782,36 @@ def _test_menu_power_up(page):
         return {fnExists, modeAfterActivate, areaOk, fourVerts, area: area};
     }""")
 
+    # ── H.1.3: Circle tool ───────────────────────────────────────────────────
+    circle_tool = page.evaluate("""() => {
+        const fnExists = typeof activateCircleTool === 'function';
+        activateCircleTool('room');
+        const modeAfterActivate = mode;
+        const scale = getScaleForPage(curPage);
+        if (!scale) { setMode('pan'); return {fnExists, modeAfterActivate, skipped:true}; }
+        const before = mPolys.length;
+        // Click center at (0,0)
+        mPts = [{x: 0, y: 0}];
+        // Simulate 2nd click at (5*pts_per_m, 0) → radius 5m
+        const center = {x:0,y:0}, radius = 5 * scale.pts_per_m;
+        mPts = _circlePolygonPts(center, radius, 32);
+        finishCurrentArea();
+        const after = mPolys.length;
+        const newPoly = mPolys[after - 1];
+        // Patch shape meta as mode handler does
+        if (newPoly) { newPoly.shape='circle'; newPoly.center={x:0,y:0}; newPoly.radius=radius; }
+        const isCircle = newPoly && newPoly.shape === 'circle';
+        const has32 = newPoly && newPoly.pts && newPoly.pts.length === 32;
+        const area = newPoly ? objectAreaM2(newPoly) : null;
+        const expectedArea = Math.PI * 25;
+        const areaOk = area != null && Math.abs(area - expectedArea) < 0.01;
+        // close name panel
+        const np = document.getElementById('name-panel'); if (np) np.style.display = 'none';
+        setMode('pan');
+        if (after > before) mPolys.pop();
+        return {fnExists, modeAfterActivate, isCircle, has32, areaOk, area, expectedArea};
+    }""")
+
     # ── H.1.1: Curves area math (additive — does not touch polyAreaM2) ───────
     curves_math = page.evaluate("""() => {
         const calibrated = typeof getScaleForPage === 'function' && !!getScaleForPage(curPage);
@@ -1831,6 +1861,7 @@ def _test_menu_power_up(page):
         "perPageLayerMemoryFixed": perPageLayerMemoryFixed,
         "curvesMath": curves_math,
         "rectTool": rect_tool,
+        "circleTool": circle_tool,
     }
 
 

@@ -1630,7 +1630,7 @@ def _test_menu_power_up(page):
 
     # ── 1. Menu structure ────────────────────────────────────────────────────
     menu_counts = page.evaluate("""() => {
-        const menus = ['project','scale','page','measure','object','layer'];
+        const menus = ['project','scale','page','measure','object','layer','annotate'];
         const out = {};
         for (const m of menus) {
             const dd = document.getElementById('dd-'+m);
@@ -1638,7 +1638,7 @@ def _test_menu_power_up(page):
         }
         return out;
     }""")
-    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 22, "object": 7, "layer": 11}
+    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 22, "object": 7, "layer": 11, "annotate": 8}
     menuStructureOk = all(menu_counts.get(m) == expected_counts[m] for m in expected_counts)
 
     # ── 2. No disabled items ─────────────────────────────────────────────────
@@ -1782,6 +1782,33 @@ def _test_menu_power_up(page):
         return {fnExists, modeAfterActivate, areaOk, fourVerts, area: area};
     }""")
 
+    # ── H.2: Annotate menu + helpers ─────────────────────────────────────────
+    annotate_menu = page.evaluate("""() => {
+        const menuExists = !!document.querySelector('[data-menu="annotate"]');
+        const ddExists = !!document.getElementById('dd-annotate');
+        const ddItems = document.querySelectorAll('#dd-annotate .dd-item').length;
+        const helpers = ['ensureAnnotations','addAnnotation','clearAnnotations','drawAnnotations'].every(n => typeof window[n] === 'function');
+        // Programmatically create one of each annotation type
+        const arr = ensureAnnotations(curPage);
+        const before = arr.length;
+        addAnnotation({id:'t1', type:'comment', pts:[{x:10,y:10}], text:'test', color:'#ffd60a', opacity:0.9});
+        addAnnotation({id:'t2', type:'text', pts:[{x:20,y:20}], text:'hello', color:'#0a84ff', opacity:1, fontSize:14});
+        addAnnotation({id:'t3', type:'highlight', pts:[{x:0,y:0},{x:50,y:50}], color:'#ffd60a', opacity:0.4});
+        addAnnotation({id:'t4', type:'rect_frame', pts:[{x:0,y:0},{x:50,y:50}], color:'#0a84ff', opacity:0.9});
+        addAnnotation({id:'t5', type:'circle_frame', pts:[{x:25,y:25},{x:35,y:25}], color:'#30d158', opacity:0.9});
+        addAnnotation({id:'t6', type:'cloud_frame', pts:[{x:0,y:0},{x:50,y:0},{x:25,y:50}], color:'#bf5af2', opacity:0.9});
+        addAnnotation({id:'t7', type:'arrow', pts:[{x:0,y:0},{x:50,y:50}], color:'#ff453a', opacity:0.9});
+        const after = arr.length;
+        const addedSeven = (after - before) === 7;
+        // Verify drawAnnotations does not throw
+        let drewOk = true;
+        try { drawAnnotations(); } catch(e) { drewOk = false; }
+        // Clear via direct array reset (skip confirm dialog)
+        arr.length = 0;
+        const clearedToZero = ensureAnnotations(curPage).length === 0;
+        return {menuExists, ddExists, ddItems, helpers, addedSeven, drewOk, clearedToZero};
+    }""")
+
     # ── H.1.4: Ellipse tool ──────────────────────────────────────────────────
     ellipse_tool = page.evaluate("""() => {
         const fnExists = typeof activateEllipseTool === 'function';
@@ -1896,6 +1923,7 @@ def _test_menu_power_up(page):
         "rectTool": rect_tool,
         "circleTool": circle_tool,
         "ellipseTool": ellipse_tool,
+        "annotateMenu": annotate_menu,
     }
 
 

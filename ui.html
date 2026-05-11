@@ -126,6 +126,31 @@
       <div id="scale-notice" class="scale-notice"><div style="flex:1"><div class="scale-notice-title" id="scale-notice-title">ยังไม่ได้ตั้ง Scale</div><div class="scale-notice-desc" id="scale-notice-desc">ค่าพื้นที่ยังใช้จริงไม่ได้</div></div><button onclick="setMode('calib')">ตั้ง Scale</button></div>
       <div id="canvas-top-bar" class="canvas-top-bar" aria-label="Canvas page status"></div>
       <div id="cc"><canvas id="canvas"></canvas></div>
+      <div id="summary-widget">
+        <div class="sw-header" id="sw-drag-handle">
+          <span class="sw-page-badge" id="sw-page-badge">—</span>
+          <span class="sw-title">สรุปผลการวัด</span>
+          <button class="sw-btn" id="sw-collapse-btn" onclick="toggleSWCollapse()">−</button>
+          <button class="sw-btn" onclick="hideSummaryWidget()">✕</button>
+        </div>
+        <div id="sw-body">
+          <div class="sw-tabs">
+            <div class="sw-tab active" data-tab="area" onclick="switchSWTab('area')">พื้นที่</div>
+            <div class="sw-tab" data-tab="floor" onclick="switchSWTab('floor')">รายชั้น</div>
+            <div class="sw-tab" data-tab="site" onclick="switchSWTab('site')">ที่ดิน</div>
+            <div class="sw-tab warn" data-tab="warn" onclick="switchSWTab('warn')">แจ้งเตือน <span id="sw-warn-badge"></span></div>
+          </div>
+          <div id="sw-tab-area" class="sw-tab-content"></div>
+          <div id="sw-tab-floor" class="sw-tab-content" style="display:none"></div>
+          <div id="sw-tab-site" class="sw-tab-content" style="display:none"></div>
+          <div id="sw-tab-warn" class="sw-tab-content" style="display:none"></div>
+        </div>
+        <div class="sw-footer">
+          <button class="sw-footer-btn" onclick="openCheckPanel()">Review (<span id="sw-warn-count">0</span>)</button>
+          <button class="sw-footer-btn primary" onclick="openExportPanel()">Export XLSX</button>
+        </div>
+      </div>
+      <button id="sw-show-btn" onclick="showSummaryWidget()" style="display:none">📊 สรุปผลการวัด</button>
     </div>
     <aside id="right-panel" class="right-panel">
       <div id="rp-header"><h2>Layers</h2></div>
@@ -413,6 +438,7 @@ function updateWorkspaceState(){
   const scBtn=document.getElementById("btn-scale-current");if(scBtn)scBtn.classList.toggle("scale-cta",hasPdf&&!scale);
   const pageInfoEl=document.getElementById("lp-page-info");if(pageInfoEl){if(hasPdf&&curPage){const tag=pageTags[curPage]||"",tagLabel=TAG_LABELS[tag]||"";const sc=getScaleForPage(curPage)||pageData?.scale||null;const scTxt=sc?scaleLabel(sc):"ยังไม่มี scale";const pgName=pageNames[curPage]||`หน้า ${curPage}`;pageInfoEl.textContent=`${pgName}${tagLabel?" · "+tagLabel:""} · ${scTxt}`;}else pageInfoEl.textContent="";}
   updateBottomBar();
+  updateSummaryWidget();
 }
 // ══════════════════════════════════════════════════════
 // Sidebar
@@ -471,7 +497,172 @@ function updateCanvasTopBar(){const el=document.getElementById("canvas-top-bar")
 function toggleInspectionPanel(){/* inspection panel removed in mockup-v3-alignment */}
 function updateInspectionPanel(){/* inspection panel removed in mockup-v3-alignment */}
 function widgetRow(label,value,state=""){return`<div class="widget-row ${state}"><span>${label}</span><b>${value}</b></div>`;}
-function updateWidgets(){/* widget-review-warnings / widget-export-ready removed in mockup-v3-alignment */}
+function updateWidgets(){updateSummaryWidget();}
+// ══════════════════════════════════════════════════════
+// Summary Widget (Phase D)
+// ══════════════════════════════════════════════════════
+const SW_KEY="bmaPlan.summaryWidget.v2";
+let swState={visible:true,collapsed:false,tab:"area",x:null,y:null};
+function _swLoad(){try{const s=JSON.parse(localStorage.getItem(SW_KEY)||"{}");if(s)Object.assign(swState,s);}catch(e){}}
+function _swSave(){try{localStorage.setItem(SW_KEY,JSON.stringify(swState));}catch(e){}}
+function initSummaryWidget(){
+  _swLoad();
+  const el=document.getElementById("summary-widget");
+  if(!el)return;
+  if(swState.x!=null&&swState.y!=null){el.style.right="auto";el.style.bottom="auto";el.style.left=swState.x+"px";el.style.top=swState.y+"px";}
+  if(!swState.visible){el.classList.add("hidden");const btn=document.getElementById("sw-show-btn");if(btn)btn.style.display="";}
+  if(swState.collapsed)el.classList.add("collapsed");
+  const collapseBtn=document.getElementById("sw-collapse-btn");if(collapseBtn)collapseBtn.textContent=swState.collapsed?"+":"−";
+  switchSWTab(swState.tab||"area",false);
+  _swDragInit();
+}
+function switchSWTab(tab,save=true){
+  swState.tab=tab;
+  document.querySelectorAll(".sw-tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===tab));
+  ["area","floor","site","warn"].forEach(id=>{const el=document.getElementById("sw-tab-"+id);if(el)el.style.display=id===tab?"":"none";});
+  if(save)_swSave();
+}
+function toggleSWCollapse(){
+  swState.collapsed=!swState.collapsed;
+  const el=document.getElementById("summary-widget");if(!el)return;
+  el.classList.toggle("collapsed",swState.collapsed);
+  const btn=document.getElementById("sw-collapse-btn");if(btn)btn.textContent=swState.collapsed?"+":"−";
+  _swSave();
+}
+function hideSummaryWidget(){
+  swState.visible=false;_swSave();
+  const el=document.getElementById("summary-widget");if(el)el.classList.add("hidden");
+  const btn=document.getElementById("sw-show-btn");if(btn)btn.style.display="";
+}
+function showSummaryWidget(){
+  swState.visible=true;_swSave();
+  const el=document.getElementById("summary-widget");if(el)el.classList.remove("hidden");
+  const btn=document.getElementById("sw-show-btn");if(btn)btn.style.display="none";
+  updateSummaryWidget();
+}
+function _swDragInit(){
+  const handle=document.getElementById("sw-drag-handle");const widget=document.getElementById("summary-widget");
+  if(!handle||!widget)return;
+  let dx=0,dy=0,startX=0,startY=0;
+  handle.addEventListener("mousedown",e=>{
+    if(e.target.classList.contains("sw-btn"))return;
+    const r=widget.getBoundingClientRect();
+    startX=e.clientX-r.left;startY=e.clientY-r.top;
+    const onMove=m=>{
+      const nx=m.clientX-startX,ny=m.clientY-startY;
+      widget.style.left=Math.max(0,Math.min(nx,window.innerWidth-widget.offsetWidth))+"px";
+      widget.style.top=Math.max(0,Math.min(ny,window.innerHeight-widget.offsetHeight))+"px";
+      widget.style.right="auto";widget.style.bottom="auto";
+    };
+    const onUp=m=>{
+      const r2=widget.getBoundingClientRect();swState.x=r2.left;swState.y=r2.top;_swSave();
+      document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);
+    };
+    document.addEventListener("mousemove",onMove);document.addEventListener("mouseup",onUp);
+    e.preventDefault();
+  });
+}
+function updateSummaryWidget(){
+  const el=document.getElementById("summary-widget");if(!el||el.classList.contains("hidden"))return;
+  const hasPdf=!!totalPages&&!!currentCaseId;
+  const badge=document.getElementById("sw-page-badge");
+  if(badge)badge.textContent=hasPdf?`หน้า ${curPage} / ${totalPages}`:"—";
+  if(!hasPdf){
+    ["area","floor","site","warn"].forEach(id=>{const c=document.getElementById("sw-tab-"+id);if(c)c.innerHTML='<div class="sw-empty">เปิด PDF เพื่อเริ่มวัด</div>';});
+    const wc=document.getElementById("sw-warn-count");if(wc)wc.textContent="0";
+    const wb=document.getElementById("sw-warn-badge");if(wb)wb.textContent="";
+    return;
+  }
+  const report=collectAreas();
+  const warnings=phase1Warnings(report);
+  const warnCount=warnings.length;
+  const wc=document.getElementById("sw-warn-count");if(wc)wc.textContent=String(warnCount);
+  const wb=document.getElementById("sw-warn-badge");if(wb)wb.textContent=warnCount>0?String(warnCount):"";
+  _swBuildArea(report);
+  _swBuildFloor(report);
+  _swBuildSite();
+  _swBuildWarn(warnings);
+}
+function _swBuildArea(report){
+  const el=document.getElementById("sw-tab-area");if(!el)return;
+  const gross=report.measuredArea||0,land=report.landArea||0,openings=report.totalOpenings||0,net=report.netArea||0;
+  const R=(v)=>v.toFixed(2);
+  let html='<div class="sw-section">';
+  html+=`<div class="sw-row"><span class="label">อาคาร/ห้อง (gross)</span><span class="value">${R(gross)} ตร.ม.</span></div>`;
+  if(land>0)html+=`<div class="sw-row land"><span class="label">ที่ดิน</span><span class="value">${R(land)} ตร.ม.</span></div>`;
+  if(openings>0)html+=`<div class="sw-row deduct"><span class="label">(−) ช่องเปิด/ว่าง</span><span class="value">−${R(openings)} ตร.ม.</span></div>`;
+  html+=`<div class="sw-row total"><span class="label">สุทธิ</span><span class="value">${R(net)} ตร.ม.</span></div>`;
+  html+='</div>';
+  if(report.areaRows&&report.areaRows.length){
+    html+='<div class="sw-section"><div class="sw-section-title">รายการพื้นที่</div>';
+    const byType={};
+    report.areaRows.forEach(r=>{const t=r[2]||"room";if(!byType[t])byType[t]=0;byType[t]+=r[3]||0;});
+    for(const[t,v] of Object.entries(byType))html+=`<div class="sw-row"><span class="label">${escHtml(AREA_TYPE_LABELS?.[t]||t)}</span><span class="value">${v.toFixed(2)} ตร.ม.</span></div>`;
+    html+='</div>';
+  }
+  el.innerHTML=html||'<div class="sw-empty">ยังไม่มีข้อมูลพื้นที่</div>';
+}
+function _swBuildFloor(report){
+  const el=document.getElementById("sw-tab-floor");if(!el)return;
+  if(!totalPages){el.innerHTML='<div class="sw-empty">ยังไม่มีหน้า</div>';return;}
+  let html='<div class="sw-section">';
+  let totalArea=0;
+  for(let pg=1;pg<=totalPages;pg++){
+    if(excludedPages.has(pg))continue;
+    const store=getStore(pg);const polys=(pg===curPage?mPolys:store.polys||[]).filter(p=>p.closed&&p.areaType!=="land");
+    const openings=(pg===curPage?mOpenings:store.openings||[]).filter(o=>o.closed);
+    let pgArea=0;
+    polys.forEach(p=>{const a=polyMetrics(p,pg).area;if(a!=null)pgArea+=a;});
+    openings.forEach(o=>{const a=polyAreaM2(o.pts);if(a!=null)pgArea-=a;});
+    totalArea+=pgArea;
+    const name=pageNames[pg]||`หน้า ${pg}`;
+    const tag=pageTags[pg]||"";
+    const tagLabel=tag?` · ${TAG_LABELS?.[tag]||tag}`:"";
+    const hasScale=!!getScaleForPage(pg);
+    if(pgArea>0||polys.length>0){
+      html+=`<div class="sw-row"><span class="label">${escHtml(name)}${escHtml(tagLabel)}</span><span class="value ${hasScale?'':'sw-warn'}">${hasScale?pgArea.toFixed(2)+"  ตร.ม.":"? (ไม่มี scale)"}</span></div>`;
+    }
+  }
+  html+=`<div class="sw-row total"><span class="label">รวมทุกชั้น</span><span class="value">${totalArea.toFixed(2)} ตร.ม.</span></div>`;
+  html+='</div>';
+  el.innerHTML=html;
+}
+function _swBuildSite(){
+  const el=document.getElementById("sw-tab-site");if(!el)return;
+  let html='';
+  let landPoly=null;
+  for(let pg=1;pg<=totalPages;pg++){
+    const polys=pg===curPage?mPolys:(getStore(pg).polys||[]);
+    const lp=polys.find(p=>p.closed&&p.areaType==="land");
+    if(lp){landPoly=lp;break;}
+  }
+  if(!landPoly){el.innerHTML='<div class="sw-empty">ยังไม่มีข้อมูลที่ดิน</div>';return;}
+  const area=polyAreaM2(landPoly.pts);
+  html+='<div class="sw-section">';
+  if(area!=null)html+=`<div class="sw-row land"><span class="label">เนื้อที่ที่ดิน</span><span class="value">${area.toFixed(2)} ตร.ม.</span></div>`;
+  const edges=landPoly.polyEdgeTags||{};
+  const edgeLabels={road:"ด้านถนน",canal:"ด้านคลอง",neighbor:"ด้านข้างเคียง",property:"แนวเขตที่ดิน"};
+  const taggedEdges=Object.entries(edges);
+  if(taggedEdges.length){
+    html+='<div class="sw-section-title" style="margin-top:6px">ด้านที่ดิน</div>';
+    taggedEdges.forEach(([idx,tag])=>{html+=`<div class="sw-row"><span class="label">${escHtml(edgeLabels[tag]||tag)}</span><span class="value">edge ${idx}</span></div>`;});
+  }
+  html+='</div>';
+  const north=getPageNorth(curPage);
+  if(north){
+    html+='<div class="sw-section"><div class="sw-section-title">ทิศเหนือ</div>';
+    html+=`<div class="sw-row"><span class="label">มุม N</span><span class="value">${north.angleDeg.toFixed(1)}°</span></div>`;
+    html+='</div>';
+  }
+  el.innerHTML=html;
+}
+function _swBuildWarn(warnings){
+  const el=document.getElementById("sw-tab-warn");if(!el)return;
+  if(!warnings.length){el.innerHTML='<div class="sw-empty" style="color:var(--green)">✓ ไม่มี Warning — พร้อม Export</div>';return;}
+  let html='';
+  warnings.forEach(w=>{html+=`<div class="sw-warn-row"><span class="sw-warn-icon">⚠</span><div class="sw-warn-text"><b>${escHtml(w.type||"warning")}</b> — ${escHtml(w.message||"")}</div></div>`;});
+  el.innerHTML=html;
+}
 // ══════════════════════════════════════════════════════
 // Fit/Zoom/Rotate
 // ══════════════════════════════════════════════════════
@@ -1242,6 +1433,7 @@ function initTooltips(){const tips={"#sidebar-toggle":"เปิด/ปิดแ
 // UI Layout / Panel Layout / Widget Placement (removed in mockup-v3-alignment)
 // ══════════════════════════════════════════════════════
 initTooltips();
+initSummaryWidget();
 buildRightPanel();
 document.getElementById("inp-color").addEventListener("mousedown",()=>{if(selItem)pushUndo();});
 document.getElementById("inp-opacity").addEventListener("mousedown",()=>{if(selItem)pushUndo();});

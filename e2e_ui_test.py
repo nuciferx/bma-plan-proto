@@ -268,9 +268,12 @@ def _test_main_measurement_ui_cleanup(page):
                     bottom: workspaceRect.bottom,
                     width: workspaceRect.width
                 },
-                toolbarFitsWorkspace: toolbarRect.left >= workspaceRect.left - 1 &&
-                    toolbarRect.right <= workspaceRect.right + 1 &&
-                    toolbarRect.width <= workspaceRect.width,
+                toolbarInToolRow: !!document.querySelector("#tool-row #float-toolbar"),
+                toolRowAboveWorkspace: (() => {
+                    const tr = document.querySelector("#tool-row").getBoundingClientRect();
+                    const ws = document.querySelector("#workspace").getBoundingClientRect();
+                    return tr.bottom <= ws.top + 1;
+                })(),
                 toolbarBelowHeader: toolbarRect.top >= topbarRect.bottom - 1,
                 topbarNoOverflow: topbarRect.right <= innerWidth + 1 &&
                     document.querySelector("#topbar")?.scrollWidth <= innerWidth + 1,
@@ -521,7 +524,116 @@ def _test_main_measurement_ui_cleanup(page):
                 exportCurrentPageFnExists: typeof exportCurrentPageAnnotatedPDF === "function",
                 exportCurrentPageBtnExists: !!document.querySelector("#export-panel button[onclick='exportCurrentPageAnnotatedPDF()']"),
                 exportAllPagesFnExists: typeof exportAllPagesAnnotatedPDF === "function",
-                exportAllPagesBtnExists: !!document.querySelector("#export-panel button[onclick='exportAllPagesAnnotatedPDF()']")
+                exportAllPagesBtnExists: !!document.querySelector("#export-panel button[onclick='exportAllPagesAnnotatedPDF()']"),
+                panelLayoutControlsExist: !!document.querySelector("#ulp-left-width-220") && !!document.querySelector("#ulp-right-width-260") && !!document.querySelector("#ulp-left-mode-docked") && !!document.querySelector("#ulp-right-mode-collapsed") && !!document.querySelector("#ulp-panel-reset"),
+                panelLayoutKeyWritten: (() => {
+                    setPanelLayoutOption("leftWidth", 300);
+                    const ok = !!localStorage.getItem("bmaPlan.panelLayoutOptions.v1");
+                    resetPanelLayout();
+                    return ok;
+                })(),
+                panelResetRestoresDefaults: (() => {
+                    setPanelLayoutOption("leftWidth", 340);
+                    setPanelLayoutOption("rightWidth", 440);
+                    setPanelLayoutOption("leftMode", "collapsed");
+                    setPanelLayoutOption("rightMode", "collapsed");
+                    resetPanelLayout();
+                    const root = document.documentElement;
+                    return root.style.getPropertyValue("--sidebar-w") === "236px" &&
+                        root.style.getPropertyValue("--rightbar-w") === "300px" &&
+                        !document.getElementById("sidebar").classList.contains("collapsed") &&
+                        !document.getElementById("right-panel").classList.contains("collapsed");
+                })(),
+                panelCollapseWorks: (() => {
+                    setPanelLayoutOption("leftMode", "collapsed");
+                    const leftCollapsed = document.getElementById("sidebar").classList.contains("collapsed");
+                    setPanelLayoutOption("leftMode", "docked");
+                    const leftRestored = !document.getElementById("sidebar").classList.contains("collapsed");
+                    setPanelLayoutOption("rightMode", "collapsed");
+                    const rightCollapsed = document.getElementById("right-panel").classList.contains("collapsed");
+                    setPanelLayoutOption("rightMode", "docked");
+                    const rightRestored = !document.getElementById("right-panel").classList.contains("collapsed");
+                    return leftCollapsed && leftRestored && rightCollapsed && rightRestored;
+                })(),
+                widgetPlacementRegistryExists: typeof WIDGET_MENU_REGISTRY !== "undefined" && Array.isArray(WIDGET_MENU_REGISTRY) && WIDGET_MENU_REGISTRY.length >= 10,
+                widgetPlacementHelpersExist: [
+                    "getDefaultWidgetPlacement","loadWidgetPlacement","saveWidgetPlacement",
+                    "normalizeWidgetPlacement","resetWidgetPlacement","setWidgetPlacementOption",
+                    "applyWidgetPlacement","renderWidgetPlacementOptions","filterWidgetPlacementList"
+                ].every(fn => typeof window[fn] === "function"),
+                widgetPlacementSearchBox: !!document.getElementById("wp-search") && !!document.getElementById("wp-category"),
+                widgetPlacementListRendered: (() => {
+                    renderWidgetPlacementOptions();
+                    return document.querySelectorAll("#wp-list .wp-row").length >= 5;
+                })(),
+                widgetPlacementKeyWritten: (() => {
+                    setWidgetPlacementOption("reviewWarnings","size","medium");
+                    const ok = !!localStorage.getItem("bmaPlan.widgetPlacement.v1");
+                    resetWidgetPlacement();
+                    return ok;
+                })(),
+                widgetVisibilityToggleWorks: (() => {
+                    setWidgetPlacementOption("reviewWarnings","visible",false);
+                    const hidden = document.getElementById("widget-review-warnings").classList.contains("widget-hidden");
+                    setWidgetPlacementOption("reviewWarnings","visible",true);
+                    const shown = !document.getElementById("widget-review-warnings").classList.contains("widget-hidden");
+                    return hidden && shown;
+                })(),
+                widgetOrderInputWorks: (() => {
+                    setWidgetPlacementOption("reviewWarnings","order",9);
+                    const el = document.getElementById("widget-review-warnings");
+                    const ok = el && el.style.order === "9";
+                    setWidgetPlacementOption("reviewWarnings","order",5);
+                    return ok;
+                })(),
+                widgetRegionMoveWorks: (() => {
+                    setWidgetPlacementOption("reviewWarnings","region","right");
+                    const inRight = !!document.querySelector("#wp-right-zone #widget-review-warnings");
+                    setWidgetPlacementOption("reviewWarnings","region","left");
+                    const inLeft = document.getElementById("widget-review-warnings")?.closest("#sidebar") !== null;
+                    return inRight && inLeft;
+                })(),
+                widgetSizeClassApplies: (() => {
+                    setWidgetPlacementOption("reviewWarnings","size","collapsed");
+                    const collapsed = document.getElementById("widget-review-warnings").classList.contains("widget-size-collapsed");
+                    setWidgetPlacementOption("reviewWarnings","size","large");
+                    const large = document.getElementById("widget-review-warnings").classList.contains("widget-size-large");
+                    setWidgetPlacementOption("reviewWarnings","size","small");
+                    return collapsed && large;
+                })(),
+                widgetPlacementResetWorks: (() => {
+                    setWidgetPlacementOption("reviewWarnings","region","right");
+                    setWidgetPlacementOption("exportReady","size","collapsed");
+                    resetWidgetPlacement();
+                    const reviewBackLeft = document.getElementById("widget-review-warnings")?.closest("#sidebar") !== null;
+                    const exportNotCollapsed = !document.getElementById("widget-export-ready").classList.contains("widget-size-collapsed");
+                    return reviewBackLeft && exportNotCollapsed;
+                })(),
+                widgetPlacementMalformedJsonSafe: (() => {
+                    const prev = localStorage.getItem("bmaPlan.widgetPlacement.v1");
+                    localStorage.setItem("bmaPlan.widgetPlacement.v1","NOT_VALID{{");
+                    let crashed = false;
+                    try { loadWidgetPlacement(); } catch(e) { crashed = true; }
+                    if (prev !== null) localStorage.setItem("bmaPlan.widgetPlacement.v1", prev);
+                    else localStorage.removeItem("bmaPlan.widgetPlacement.v1");
+                    loadWidgetPlacement();
+                    return !crashed;
+                })(),
+                widgetLockedRespected: (() => {
+                    const before = document.getElementById("rp-content")?.closest("#right-panel") !== null;
+                    setWidgetPlacementOption("currentPageLayers","region","left");
+                    const stillRight = document.getElementById("rp-content")?.closest("#right-panel") !== null;
+                    return before && stillRight;
+                })(),
+                widgetLeftPanelScrollOk: (() => {
+                    const sb = document.querySelector(".sidebar-scroll-body");
+                    return !!sb && getComputedStyle(sb).overflowY === "auto";
+                })(),
+                widgetRightPanelScrollOk: (() => {
+                    const rc = document.getElementById("rp-content");
+                    return !!rc && getComputedStyle(rc).overflowY === "auto";
+                })(),
+                widgetCurrentPageLayersVisible: !!document.getElementById("rp-content") && !document.getElementById("rp-content").classList.contains("widget-hidden")
             };
         }"""
     )
@@ -531,7 +643,7 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"empty state still visible after starting measurement: {result}")
     if result["visibleToolbarLayerControls"]:
         raise AssertionError(f"duplicate toolbar layer controls still visible: {result}")
-    if not result["toolbarFitsWorkspace"] or not result["toolbarBelowHeader"] or not result["topbarNoOverflow"] or not result["bodyNoHorizontalOverflow"]:
+    if not result["toolbarInToolRow"] or not result["toolRowAboveWorkspace"] or not result["toolbarBelowHeader"] or not result["topbarNoOverflow"] or not result["bodyNoHorizontalOverflow"]:
         raise AssertionError(f"responsive toolbar overflows MacBook-width workspace: {result}")
     if not result["topbarHeightOk"] or not result["directHeaderActions"] or not result["openDropdownNeutralized"] or not result["exportRightAligned"] or not result["exportGreen"]:
         raise AssertionError(f"restored top header contract failed: {result}")
@@ -665,6 +777,44 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"exportAllPagesAnnotatedPDF() function missing: {result}")
     if not result.get("exportAllPagesBtnExists"):
         raise AssertionError(f"Export All Pages button missing from export panel: {result}")
+    if not result.get("panelLayoutControlsExist"):
+        raise AssertionError(f"Panel layout controls missing from Layout Options panel: {result}")
+    if not result.get("panelLayoutKeyWritten"):
+        raise AssertionError(f"localStorage key 'bmaPlan.panelLayoutOptions.v1' not written: {result}")
+    if not result.get("panelResetRestoresDefaults"):
+        raise AssertionError(f"Reset panel layout did not restore defaults: {result}")
+    if not result.get("panelCollapseWorks"):
+        raise AssertionError(f"Panel collapse/restore did not work: {result}")
+    if not result.get("widgetPlacementRegistryExists"):
+        raise AssertionError(f"WIDGET_MENU_REGISTRY missing or too small: {result}")
+    if not result.get("widgetPlacementHelpersExist"):
+        raise AssertionError(f"Widget placement helper functions missing: {result}")
+    if not result.get("widgetPlacementSearchBox"):
+        raise AssertionError(f"Widget placement search/category controls missing: {result}")
+    if not result.get("widgetPlacementListRendered"):
+        raise AssertionError(f"Widget placement list did not render rows: {result}")
+    if not result.get("widgetPlacementKeyWritten"):
+        raise AssertionError(f"localStorage key 'bmaPlan.widgetPlacement.v1' not written after option change: {result}")
+    if not result.get("widgetVisibilityToggleWorks"):
+        raise AssertionError(f"Widget visibility toggle did not apply widget-hidden class: {result}")
+    if not result.get("widgetOrderInputWorks"):
+        raise AssertionError(f"Widget order input did not change style.order: {result}")
+    if not result.get("widgetRegionMoveWorks"):
+        raise AssertionError(f"Widget region move (left/right) did not move DOM element: {result}")
+    if not result.get("widgetSizeClassApplies"):
+        raise AssertionError(f"Widget size class did not apply: {result}")
+    if not result.get("widgetPlacementResetWorks"):
+        raise AssertionError(f"Widget placement reset did not restore defaults: {result}")
+    if not result.get("widgetPlacementMalformedJsonSafe"):
+        raise AssertionError(f"Widget placement loader crashed on malformed JSON: {result}")
+    if not result.get("widgetLockedRespected"):
+        raise AssertionError(f"Locked widget (currentPageLayers) was moved by region change: {result}")
+    if not result.get("widgetLeftPanelScrollOk"):
+        raise AssertionError(f"Left panel scroll body lost overflow-y:auto: {result}")
+    if not result.get("widgetRightPanelScrollOk"):
+        raise AssertionError(f"Right panel #rp-content lost overflow-y:auto: {result}")
+    if not result.get("widgetCurrentPageLayersVisible"):
+        raise AssertionError(f"Current page layers panel hidden after widget placement: {result}")
     page.locator("#btn-path").click()
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":

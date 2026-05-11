@@ -48,6 +48,67 @@
       <span id="status"></span>
     </div>
   </div>
+  <div id="tool-row"><div id="float-toolbar" aria-label="Measurement toolbar">
+    <div class="ft-group" id="toolbar-primary" aria-label="Primary drawing tools">
+      <button class="ft-btn active" id="btn-pan" onclick="setMode('pan')"><span class="ft-icon">✋</span><span class="ft-label optional">Pan</span></button>
+      <button class="ft-btn" id="btn-sel" onclick="setMode('sel')"><span class="ft-icon">↖</span><span class="ft-label">เลือก</span></button>
+      <div class="ft-sep"></div>
+      <button class="ft-btn" id="btn-area" onclick="activateAreaTool('room')"><span class="ft-icon">⬡</span><span class="ft-label">พื้นที่</span></button>
+      <button class="ft-btn" id="btn-opening" onclick="toggleOpening()"><span class="ft-icon">□</span><span class="ft-label">ช่องเปิด</span></button>
+      <button class="ft-btn" id="btn-parcel-boundary" onclick="activateAreaTool('land')"><span class="ft-icon">▱</span><span class="ft-label">ที่ดิน</span></button>
+      <div class="ft-sep"></div>
+      <button class="ft-btn" id="btn-ref" onclick="setMode('ref')"><span class="ft-icon">⌁</span><span class="ft-label">อ้างอิง</span></button>
+      <button class="ft-btn" id="btn-dist" onclick="setMode('dist')"><span class="ft-icon">↔</span><span class="ft-label">ระยะ</span></button>
+      <button class="ft-btn" id="btn-calib" onclick="setMode('calib')"><span class="ft-icon">∕</span><span class="ft-label">Scale</span></button>
+      <div class="ft-sep"></div>
+      <button class="ft-btn" id="btn-north" onclick="setMode('north')"><span class="ft-icon">↑N</span><span class="ft-label">เหนือ</span></button>
+    </div>
+    <div class="ft-sep"></div>
+    <div class="ft-group" id="toolbar-layer" aria-label="Active layer">
+      <select id="active-layer-select" class="ft-btn" style="max-width:132px" onchange="setActiveLayer(this.value)" title="เลือก layer สำหรับ object ใหม่">
+        <option value="sub_area">Layer: พื้นที่ย่อย</option>
+        <option value="base_area">Layer: พื้นที่หลัก</option>
+        <option value="deduction">Layer: ช่องเปิด</option>
+        <option value="reference_geometry">Layer: อ้างอิง</option>
+      </select>
+    </div>
+    <div class="ft-sep"></div>
+    <div class="ft-group" id="toolbar-edit" aria-label="Edit actions">
+      <button class="ft-btn" id="btn-undo" onclick="undo()"><span class="ft-icon">↶</span><span class="ft-label optional">Undo</span></button>
+      <button class="ft-btn" id="btn-redo" onclick="redo()"><span class="ft-icon">↷</span><span class="ft-label optional">Redo</span></button>
+      <button class="ft-btn danger" id="btn-delete-selected" onclick="deleteSelectedObject()"><span class="ft-icon">⌫</span><span class="ft-label optional">ลบ</span></button>
+    </div>
+    <div class="ft-sep"></div>
+    <div class="toolbar-more-wrap" id="toolbar-more">
+      <button class="ft-btn" id="toolbar-more-btn" onclick="toggleToolbarMore(event)">เพิ่มเติม ▾</button>
+      <div id="toolbar-more-menu" aria-label="เครื่องมือเพิ่มเติม">
+        <div class="more-section">
+          <div class="more-section-title">เครื่องมือเพิ่มเติม</div>
+          <button class="ft-btn" id="btn-path" onclick="setMode('path')">〽 ระยะต่อเนื่อง</button>
+          <button class="ft-btn" id="btn-refdist" onclick="toggleRefDistance()">↔ ถึง Ref</button>
+          <button class="ft-btn" id="btn-perp" onclick="togglePerp()">⊥ ตั้งฉาก</button>
+          <select id="ref-type" class="ft-btn" onchange="curRefType=this.value">
+            <option value="road">ถนน</option><option value="canal">คลอง</option><option value="property">เขตที่ดิน</option><option value="wall">ผนัง</option><option value="grid">แกน</option><option value="custom">อื่นๆ</option>
+          </select>
+          <button class="ft-btn" id="btn-parking" onclick="setMode('parking')">🚗 ที่จอด</button>
+          <select id="parking-type" class="ft-btn" onchange="curParkingType=this.value">
+            <option value="car">รถยนต์</option><option value="ev">EV</option><option value="disabled">ผู้พิการ</option><option value="motorcycle">มอเตอร์ไซค์</option><option value="service">บริการ</option>
+          </select>
+          <button class="ft-btn" id="btn-ortho" onclick="toggleOrtho()" title="ล็อก 0°/90° ตลอด (เปิด = ortho mode)">⊖ ตั้งฉาก</button>
+          <button class="ft-btn" id="btn-land-edge" onclick="openSelectedLandEdgePanel()" style="display:none">ด้านที่ดิน</button>
+          <button class="ft-btn" id="btn-setbackdist" onclick="toggleSetbackDistance()" style="display:none">ระยะช่วยวัด</button>
+        </div>
+        <div class="more-section">
+          <div class="more-section-title">มุมมองและงานหน้า</div>
+          <button class="ft-btn" id="btn-loupe" onclick="toggleLoupe()" title="เปิด/ปิดแว่นขยาย (ใช้ขณะวาด)">🔍 แว่น</button>
+          <button class="ft-btn" onclick="resizeLoupe(-20)" title="แว่นเล็กลง">− เล็กลง</button>
+          <span id="lbl-loupe-r" class="ft-btn" style="justify-content:center;color:var(--text2)">160px</span>
+          <button class="ft-btn" onclick="resizeLoupe(+20)" title="แว่นใหญ่ขึ้น">+ ใหญ่ขึ้น</button>
+          <button class="ft-btn danger more-wide" id="btn-clear-measures" onclick="clearMeasures()">🗑 ล้าง</button>
+        </div>
+      </div>
+    </div>
+  </div></div>
   <div id="main">
     <div id="sidebar">
       <div id="sidebar-header"><h2>Sheets</h2><span id="sidebar-count" style="font-size:10px;color:var(--text3)"></span></div>
@@ -96,6 +157,7 @@
           <button class="widget-link" onclick="if(totalPages)openPageManager();else alert('เปิด PDF ก่อน')">Export ›</button>
         </div>
       </div>
+      <div id="wp-left-zone" class="wp-zone" aria-label="Widget placement left zone"></div>
       <div id="sidebar-content"></div>
       <div id="lp-objects-content" style="display:none;padding:4px 0"></div>
       <div id="lp-properties-content" style="display:none;padding:8px 0"></div>
@@ -114,6 +176,7 @@
     <aside id="right-panel">
       <div id="rp-header"><h2>Layers</h2></div>
       <div id="rp-content"><div class="rp-empty">เปิด PDF แล้วเลือกหรือวาด object เพื่อดูรายละเอียด</div></div>
+      <div id="wp-right-zone" class="wp-zone" aria-label="Widget placement right zone"></div>
     </aside>
   </div>
   <div id="bottombar">
@@ -142,67 +205,6 @@
     <span class="bb-item">Page: <span class="bb-val" id="bb-page-name" style="color:var(--cyan)">—</span></span>
     <span class="bb-item" id="page-summary">ยังไม่มีรายการพื้นที่</span>
     <span class="bb-measure" id="measure-result"></span>
-  </div>
-</div>
-<div id="float-toolbar" aria-label="Measurement toolbar">
-  <div class="ft-group" id="toolbar-primary" aria-label="Primary drawing tools">
-    <button class="ft-btn active" id="btn-pan" onclick="setMode('pan')"><span class="ft-icon">✋</span><span class="ft-label optional">Pan</span></button>
-    <button class="ft-btn" id="btn-sel" onclick="setMode('sel')"><span class="ft-icon">↖</span><span class="ft-label">เลือก</span></button>
-    <div class="ft-sep"></div>
-    <button class="ft-btn" id="btn-area" onclick="activateAreaTool('room')"><span class="ft-icon">⬡</span><span class="ft-label">พื้นที่</span></button>
-    <button class="ft-btn" id="btn-opening" onclick="toggleOpening()"><span class="ft-icon">□</span><span class="ft-label">ช่องเปิด</span></button>
-    <button class="ft-btn" id="btn-parcel-boundary" onclick="activateAreaTool('land')"><span class="ft-icon">▱</span><span class="ft-label">ที่ดิน</span></button>
-    <div class="ft-sep"></div>
-    <button class="ft-btn" id="btn-ref" onclick="setMode('ref')"><span class="ft-icon">⌁</span><span class="ft-label">อ้างอิง</span></button>
-    <button class="ft-btn" id="btn-dist" onclick="setMode('dist')"><span class="ft-icon">↔</span><span class="ft-label">ระยะ</span></button>
-    <button class="ft-btn" id="btn-calib" onclick="setMode('calib')"><span class="ft-icon">∕</span><span class="ft-label">Scale</span></button>
-    <div class="ft-sep"></div>
-    <button class="ft-btn" id="btn-north" onclick="setMode('north')"><span class="ft-icon">↑N</span><span class="ft-label">เหนือ</span></button>
-  </div>
-  <div class="ft-sep"></div>
-  <div class="ft-group" id="toolbar-layer" aria-label="Active layer">
-    <select id="active-layer-select" class="ft-btn" style="max-width:132px" onchange="setActiveLayer(this.value)" title="เลือก layer สำหรับ object ใหม่">
-      <option value="sub_area">Layer: พื้นที่ย่อย</option>
-      <option value="base_area">Layer: พื้นที่หลัก</option>
-      <option value="deduction">Layer: ช่องเปิด</option>
-      <option value="reference_geometry">Layer: อ้างอิง</option>
-    </select>
-  </div>
-  <div class="ft-sep"></div>
-  <div class="ft-group" id="toolbar-edit" aria-label="Edit actions">
-    <button class="ft-btn" id="btn-undo" onclick="undo()"><span class="ft-icon">↶</span><span class="ft-label optional">Undo</span></button>
-    <button class="ft-btn" id="btn-redo" onclick="redo()"><span class="ft-icon">↷</span><span class="ft-label optional">Redo</span></button>
-    <button class="ft-btn danger" id="btn-delete-selected" onclick="deleteSelectedObject()"><span class="ft-icon">⌫</span><span class="ft-label optional">ลบ</span></button>
-  </div>
-  <div class="ft-sep"></div>
-  <div class="toolbar-more-wrap" id="toolbar-more">
-    <button class="ft-btn" id="toolbar-more-btn" onclick="toggleToolbarMore(event)">เพิ่มเติม ▾</button>
-    <div id="toolbar-more-menu" aria-label="เครื่องมือเพิ่มเติม">
-      <div class="more-section">
-        <div class="more-section-title">เครื่องมือเพิ่มเติม</div>
-        <button class="ft-btn" id="btn-path" onclick="setMode('path')">〽 ระยะต่อเนื่อง</button>
-        <button class="ft-btn" id="btn-refdist" onclick="toggleRefDistance()">↔ ถึง Ref</button>
-        <button class="ft-btn" id="btn-perp" onclick="togglePerp()">⊥ ตั้งฉาก</button>
-        <select id="ref-type" class="ft-btn" onchange="curRefType=this.value">
-          <option value="road">ถนน</option><option value="canal">คลอง</option><option value="property">เขตที่ดิน</option><option value="wall">ผนัง</option><option value="grid">แกน</option><option value="custom">อื่นๆ</option>
-        </select>
-        <button class="ft-btn" id="btn-parking" onclick="setMode('parking')">🚗 ที่จอด</button>
-        <select id="parking-type" class="ft-btn" onchange="curParkingType=this.value">
-          <option value="car">รถยนต์</option><option value="ev">EV</option><option value="disabled">ผู้พิการ</option><option value="motorcycle">มอเตอร์ไซค์</option><option value="service">บริการ</option>
-        </select>
-        <button class="ft-btn" id="btn-ortho" onclick="toggleOrtho()" title="ล็อก 0°/90° ตลอด (เปิด = ortho mode)">⊖ ตั้งฉาก</button>
-        <button class="ft-btn" id="btn-land-edge" onclick="openSelectedLandEdgePanel()" style="display:none">ด้านที่ดิน</button>
-        <button class="ft-btn" id="btn-setbackdist" onclick="toggleSetbackDistance()" style="display:none">ระยะช่วยวัด</button>
-      </div>
-      <div class="more-section">
-        <div class="more-section-title">มุมมองและงานหน้า</div>
-        <button class="ft-btn" id="btn-loupe" onclick="toggleLoupe()" title="เปิด/ปิดแว่นขยาย (ใช้ขณะวาด)">🔍 แว่น</button>
-        <button class="ft-btn" onclick="resizeLoupe(-20)" title="แว่นเล็กลง">− เล็กลง</button>
-        <span id="lbl-loupe-r" class="ft-btn" style="justify-content:center;color:var(--text2)">160px</span>
-        <button class="ft-btn" onclick="resizeLoupe(+20)" title="แว่นใหญ่ขึ้น">+ ใหญ่ขึ้น</button>
-        <button class="ft-btn danger more-wide" id="btn-clear-measures" onclick="clearMeasures()">🗑 ล้าง</button>
-      </div>
-    </div>
   </div>
 </div>
 <div id="snap-cur"></div><div id="snap-lbl"></div>
@@ -334,10 +336,57 @@
         <button id="ulp-widgets-v3" class="ulp-opt" onclick="setUiLayoutOption('widgets','v3')">Mockup V3 Summary Style</button>
       </div>
     </div>
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">E. Left Panel</div>
+      <div class="ulp-opts">
+        <button id="ulp-left-width-220" class="ulp-opt" onclick="setPanelLayoutOption('leftWidth',220)">220px</button>
+        <button id="ulp-left-width-260" class="ulp-opt" onclick="setPanelLayoutOption('leftWidth',260)">260px</button>
+        <button id="ulp-left-width-300" class="ulp-opt" onclick="setPanelLayoutOption('leftWidth',300)">300px</button>
+        <button id="ulp-left-width-340" class="ulp-opt" onclick="setPanelLayoutOption('leftWidth',340)">340px</button>
+      </div>
+      <div class="ulp-sect-label" style="margin-top:6px">Left Panel Mode</div>
+      <div class="ulp-opts">
+        <button id="ulp-left-mode-docked" class="ulp-opt" onclick="setPanelLayoutOption('leftMode','docked')">Docked</button>
+        <button id="ulp-left-mode-collapsed" class="ulp-opt" onclick="setPanelLayoutOption('leftMode','collapsed')">Collapsed</button>
+      </div>
+    </div>
+    <div class="ulp-sect">
+      <div class="ulp-sect-label">F. Right Panel</div>
+      <div class="ulp-opts">
+        <button id="ulp-right-width-260" class="ulp-opt" onclick="setPanelLayoutOption('rightWidth',260)">260px</button>
+        <button id="ulp-right-width-320" class="ulp-opt" onclick="setPanelLayoutOption('rightWidth',320)">320px</button>
+        <button id="ulp-right-width-380" class="ulp-opt" onclick="setPanelLayoutOption('rightWidth',380)">380px</button>
+        <button id="ulp-right-width-440" class="ulp-opt" onclick="setPanelLayoutOption('rightWidth',440)">440px</button>
+      </div>
+      <div class="ulp-sect-label" style="margin-top:6px">Right Panel Mode</div>
+      <div class="ulp-opts">
+        <button id="ulp-right-mode-docked" class="ulp-opt" onclick="setPanelLayoutOption('rightMode','docked')">Docked</button>
+        <button id="ulp-right-mode-collapsed" class="ulp-opt" onclick="setPanelLayoutOption('rightMode','collapsed')">Collapsed</button>
+      </div>
+    </div>
+    <div class="ulp-sect" id="ulp-widget-placement-sect">
+      <div class="ulp-sect-label">G. Widget / Menu Placement</div>
+      <input id="wp-search" class="ulp-wp-search" type="text" placeholder="🔍 Search widget..." oninput="filterWidgetPlacementList()">
+      <select id="wp-category" class="ulp-wp-filter" onchange="filterWidgetPlacementList()">
+        <option value="all">All categories</option>
+        <option value="info">Info</option>
+        <option value="status">Status</option>
+        <option value="navigation">Navigation</option>
+        <option value="layer">Layer</option>
+        <option value="review">Review</option>
+        <option value="export">Export</option>
+      </select>
+      <div id="wp-list" class="ulp-wp-list"></div>
+      <div class="ulp-opts" style="margin-top:6px">
+        <button id="ulp-wp-reset" class="ulp-opt" onclick="resetWidgetPlacement()">↺ Reset</button>
+        <button id="ulp-wp-apply" class="ulp-opt" onclick="applyWidgetPlacement()">Apply</button>
+      </div>
+    </div>
   </div>
   <div class="ulp-footer">
     <button class="ulp-reset-btn" onclick="applyUiLayoutPreset('current')">↺ Reset to Current Stable</button>
     <button class="ulp-reset-btn" onclick="applyUiLayoutPreset('mockup_v3')">→ Reset to Mockup V3</button>
+    <button id="ulp-panel-reset" class="ulp-reset-btn" onclick="resetPanelLayout()">↺ Reset Panel Layout</button>
   </div>
 </div>
 <script src="/static/js/semantic-meta.js"></script>
@@ -1382,13 +1431,241 @@ function toggleUiLayoutPanel(){
   _updateUiLayoutPanelState();
 }
 function closeUiLayoutPanel(){const p=document.getElementById('ui-layout-panel');if(p){p.style.display='none';_updateUiLayoutPanelState();}}
+// ══════════════════════════════════════════════════════
+// Panel Layout Options
+// ══════════════════════════════════════════════════════
+const PANEL_LAYOUT_KEY='bmaPlan.panelLayoutOptions.v1';
+let panelLayout={leftWidth:236,rightWidth:300,leftMode:'docked',rightMode:'docked'};
+function loadPanelLayout(){
+  try{const s=localStorage.getItem(PANEL_LAYOUT_KEY);if(s){const p=JSON.parse(s);panelLayout=Object.assign({leftWidth:236,rightWidth:300,leftMode:'docked',rightMode:'docked'},p);}}catch(e){}
+  applyPanelLayout();
+}
+function savePanelLayout(){try{localStorage.setItem(PANEL_LAYOUT_KEY,JSON.stringify(panelLayout));}catch(e){}}
+function applyPanelLayout(){
+  const root=document.documentElement;
+  root.style.setProperty('--sidebar-w',panelLayout.leftWidth+'px');
+  root.style.setProperty('--rightbar-w',panelLayout.rightWidth+'px');
+  document.getElementById('sidebar').classList.toggle('collapsed',panelLayout.leftMode==='collapsed');
+  document.getElementById('right-panel').classList.toggle('collapsed',panelLayout.rightMode==='collapsed');
+  _updatePanelLayoutPanelState();
+  if(bgImg)setTimeout(()=>fitToWindow(),220);
+}
+function setPanelLayoutOption(key,value){
+  if(key==='leftWidth'||key==='rightWidth')panelLayout[key]=parseInt(value);
+  else panelLayout[key]=value;
+  applyPanelLayout();
+  savePanelLayout();
+}
+function resetPanelLayout(){
+  panelLayout={leftWidth:236,rightWidth:300,leftMode:'docked',rightMode:'docked'};
+  applyPanelLayout();
+  savePanelLayout();
+}
+function _updatePanelLayoutPanelState(){
+  const widths={left:[220,260,300,340],right:[260,320,380,440]};
+  widths.left.forEach(w=>{const el=document.getElementById('ulp-left-width-'+w);if(el)el.classList.toggle('active',panelLayout.leftWidth===w);});
+  widths.right.forEach(w=>{const el=document.getElementById('ulp-right-width-'+w);if(el)el.classList.toggle('active',panelLayout.rightWidth===w);});
+  const ld=document.getElementById('ulp-left-mode-docked'),lc=document.getElementById('ulp-left-mode-collapsed');
+  if(ld)ld.classList.toggle('active',panelLayout.leftMode==='docked');
+  if(lc)lc.classList.toggle('active',panelLayout.leftMode==='collapsed');
+  const rd=document.getElementById('ulp-right-mode-docked'),rc=document.getElementById('ulp-right-mode-collapsed');
+  if(rd)rd.classList.toggle('active',panelLayout.rightMode==='docked');
+  if(rc)rc.classList.toggle('active',panelLayout.rightMode==='collapsed');
+}
 document.addEventListener('click',function(e){
   const panel=document.getElementById('ui-layout-panel');
   const btn=document.getElementById('btn-ui-layout');
   if(!panel||panel.style.display!=='flex')return;
   if(!panel.contains(e.target)&&e.target!==btn&&!(btn&&btn.contains(e.target)))closeUiLayoutPanel();
 });
+// ══════════════════════════════════════════════════════
+// Widget / Menu Placement System (localStorage only)
+// ══════════════════════════════════════════════════════
+const WIDGET_PLACEMENT_KEY='bmaPlan.widgetPlacement.v1';
+const WIDGET_MENU_REGISTRY=[
+  {id:"pageInfo",label:"Page Info",description:"หัวข้อหน้า/Scale ปัจจุบัน",category:"info",selector:"#lp-page-info",defaultRegion:"left",allowedRegions:["left","hidden"],defaultOrder:1,defaultSize:"small",visible:true,locked:true},
+  {id:"inspectionStatus",label:"Inspection Status",description:"แผงสถานะการตรวจ",category:"status",selector:"#inspection-panel",defaultRegion:"left",allowedRegions:["left","hidden"],defaultOrder:2,defaultSize:"medium",visible:true,locked:true},
+  {id:"workflow",label:"Workflow Status",description:"ลำดับงานหลัก",category:"status",selector:"#workflow-card",defaultRegion:"left",allowedRegions:["left","right","hidden"],defaultOrder:3,defaultSize:"small",visible:true,locked:false},
+  {id:"scaleStatus",label:"Scale Status",description:"Badge สถานะ Scale ใน topbar",category:"status",selector:"#scale-badge",defaultRegion:"top",allowedRegions:["top"],defaultOrder:1,defaultSize:"small",visible:true,locked:true},
+  {id:"reviewWarnings",label:"Review Warnings",description:"แสดงคำเตือนสำหรับการตรวจ",category:"review",selector:"#widget-review-warnings",defaultRegion:"left",allowedRegions:["left","right","hidden"],defaultOrder:5,defaultSize:"small",visible:true,locked:false},
+  {id:"exportReady",label:"Export Ready",description:"สถานะความพร้อมในการ export",category:"export",selector:"#widget-export-ready",defaultRegion:"left",allowedRegions:["left","right","hidden"],defaultOrder:6,defaultSize:"small",visible:true,locked:false},
+  {id:"sheets",label:"Sheets",description:"รายการหน้าใน left panel",category:"navigation",selector:"#sidebar-content",defaultRegion:"left",allowedRegions:["left"],defaultOrder:10,defaultSize:"full",visible:true,locked:true},
+  {id:"objects",label:"Objects",description:"รายการ object",category:"navigation",selector:"#lp-objects-content",defaultRegion:"left",allowedRegions:["left"],defaultOrder:11,defaultSize:"full",visible:true,locked:true},
+  {id:"properties",label:"Properties",description:"รายการคุณสมบัติของ object",category:"navigation",selector:"#lp-properties-content",defaultRegion:"left",allowedRegions:["left"],defaultOrder:12,defaultSize:"full",visible:true,locked:true},
+  {id:"layerContext",label:"Layer Context",description:"หัวข้อ Layers ใน right panel",category:"layer",selector:"#rp-header",defaultRegion:"right",allowedRegions:["right"],defaultOrder:1,defaultSize:"small",visible:true,locked:true},
+  {id:"currentPageLayers",label:"Current Page Layers",description:"รายการ layer ของหน้าปัจจุบัน",category:"layer",selector:"#rp-content",defaultRegion:"right",allowedRegions:["right"],defaultOrder:2,defaultSize:"full",visible:true,locked:true},
+];
+const _WIDGET_DEFAULT_PARENTS=new Map();
+let widgetPlacement=null;
+function _captureWidgetOriginalParents(){
+  WIDGET_MENU_REGISTRY.forEach(w=>{
+    if(_WIDGET_DEFAULT_PARENTS.has(w.id))return;
+    const el=document.querySelector(w.selector);
+    if(el)_WIDGET_DEFAULT_PARENTS.set(w.id,{parent:el.parentNode,nextSibling:el.nextSibling});
+  });
+}
+function getDefaultWidgetPlacement(){
+  const cfg={left:[],right:[]};
+  WIDGET_MENU_REGISTRY.forEach(w=>{
+    if(w.defaultRegion==='left'||w.defaultRegion==='right'){
+      cfg[w.defaultRegion].push({id:w.id,order:w.defaultOrder,size:w.defaultSize,visible:w.visible!==false});
+    }
+  });
+  return cfg;
+}
+function normalizeWidgetPlacement(cfg){
+  const result={left:[],right:[]};
+  const seen=new Set();
+  const inputOk=cfg&&typeof cfg==='object';
+  ['left','right'].forEach(region=>{
+    const arr=(inputOk&&Array.isArray(cfg[region]))?cfg[region]:[];
+    arr.forEach(item=>{
+      if(!item||typeof item.id!=='string')return;
+      const reg=WIDGET_MENU_REGISTRY.find(w=>w.id===item.id);
+      if(!reg)return;
+      if(!reg.allowedRegions.includes(region))return;
+      if(reg.locked&&reg.defaultRegion!==region)return;
+      if(seen.has(item.id))return;
+      seen.add(item.id);
+      const size=['collapsed','small','medium','large','full'].includes(item.size)?item.size:reg.defaultSize;
+      const ord=(typeof item.order==='number'&&isFinite(item.order))?item.order:reg.defaultOrder;
+      result[region].push({id:item.id,order:ord,size:size,visible:item.visible!==false});
+    });
+  });
+  WIDGET_MENU_REGISTRY.forEach(w=>{
+    if(seen.has(w.id))return;
+    if(w.defaultRegion==='left'||w.defaultRegion==='right'){
+      result[w.defaultRegion].push({id:w.id,order:w.defaultOrder,size:w.defaultSize,visible:w.visible!==false});
+    }
+  });
+  return result;
+}
+function loadWidgetPlacement(){
+  let stored=null;
+  try{const s=localStorage.getItem(WIDGET_PLACEMENT_KEY);if(s)stored=JSON.parse(s);}catch(e){stored=null;}
+  widgetPlacement=normalizeWidgetPlacement(stored);
+  applyWidgetPlacement();
+  renderWidgetPlacementOptions();
+}
+function saveWidgetPlacement(cfg){
+  try{localStorage.setItem(WIDGET_PLACEMENT_KEY,JSON.stringify(cfg||widgetPlacement));}catch(e){}
+}
+function resetWidgetPlacement(){
+  widgetPlacement=getDefaultWidgetPlacement();
+  try{localStorage.removeItem(WIDGET_PLACEMENT_KEY);}catch(e){}
+  applyWidgetPlacement();
+  renderWidgetPlacementOptions();
+}
+function setWidgetPlacementOption(id,field,value){
+  const reg=WIDGET_MENU_REGISTRY.find(w=>w.id===id);
+  if(!reg)return;
+  let curRegion=null,curEntry=null;
+  ['left','right'].forEach(r=>{
+    const e=widgetPlacement[r].find(x=>x.id===id);
+    if(e){curRegion=r;curEntry=e;}
+  });
+  if(!curEntry){
+    const fallback=(reg.defaultRegion==='left'||reg.defaultRegion==='right')?reg.defaultRegion:'left';
+    curEntry={id:id,order:reg.defaultOrder,size:reg.defaultSize,visible:true};
+    widgetPlacement[fallback].push(curEntry);
+    curRegion=fallback;
+  }
+  if(field==='region'){
+    if(reg.locked)return;
+    if(!['left','right','hidden'].includes(value))return;
+    if(value!=='hidden'&&!reg.allowedRegions.includes(value))return;
+    widgetPlacement[curRegion]=widgetPlacement[curRegion].filter(x=>x.id!==id);
+    if(value==='left'||value==='right')widgetPlacement[value].push(curEntry);
+  }else if(field==='visible'){
+    curEntry.visible=!!value;
+  }else if(field==='order'){
+    const n=parseInt(value,10);
+    if(!isNaN(n))curEntry.order=Math.max(1,Math.min(99,n));
+  }else if(field==='size'){
+    if(['collapsed','small','medium','large','full'].includes(value))curEntry.size=value;
+  }
+  applyWidgetPlacement();
+  saveWidgetPlacement();
+  renderWidgetPlacementOptions();
+}
+function applyWidgetPlacement(){
+  _captureWidgetOriginalParents();
+  const sizeClasses=['widget-size-collapsed','widget-size-small','widget-size-medium','widget-size-large','widget-size-full'];
+  const leftZone=document.getElementById('wp-left-zone');
+  const rightZone=document.getElementById('wp-right-zone');
+  const map={};
+  ['left','right'].forEach(r=>{(widgetPlacement[r]||[]).forEach(e=>{map[e.id]={region:r,entry:e};});});
+  WIDGET_MENU_REGISTRY.forEach(w=>{
+    const el=document.querySelector(w.selector);
+    if(!el)return;
+    sizeClasses.forEach(c=>el.classList.remove(c));
+    el.classList.remove('widget-hidden');
+    el.style.order='';
+    const placed=map[w.id];
+    if(!placed){
+      el.classList.add('widget-hidden');
+      return;
+    }
+    const region=placed.region, entry=placed.entry;
+    el.classList.add('widget-size-'+(entry.size||w.defaultSize||'small'));
+    if(typeof entry.order==='number')el.style.order=String(entry.order);
+    if(!entry.visible)el.classList.add('widget-hidden');
+    if(w.locked){
+      const orig=_WIDGET_DEFAULT_PARENTS.get(w.id);
+      if(orig&&el.parentNode!==orig.parent){
+        if(orig.nextSibling&&orig.nextSibling.parentNode===orig.parent)orig.parent.insertBefore(el,orig.nextSibling);
+        else orig.parent.appendChild(el);
+      }
+      return;
+    }
+    if(region==='left'&&leftZone){
+      if(el.parentNode!==leftZone)leftZone.appendChild(el);
+    }else if(region==='right'&&rightZone){
+      if(el.parentNode!==rightZone)rightZone.appendChild(el);
+    }
+  });
+}
+function filterWidgetPlacementList(){renderWidgetPlacementOptions();}
+function renderWidgetPlacementOptions(){
+  const list=document.getElementById('wp-list');
+  if(!list)return;
+  const search=(document.getElementById('wp-search')?.value||'').trim().toLowerCase();
+  const category=(document.getElementById('wp-category')?.value||'all');
+  list.innerHTML='';
+  WIDGET_MENU_REGISTRY.forEach(w=>{
+    if(category!=='all'&&w.category!==category)return;
+    if(search){
+      const hay=(w.label+' '+w.id+' '+(w.description||'')).toLowerCase();
+      if(hay.indexOf(search)<0)return;
+    }
+    let entry=null,region='hidden';
+    ['left','right'].forEach(r=>{const e=widgetPlacement[r].find(x=>x.id===w.id);if(e){entry=e;region=r;}});
+    const visible=entry?entry.visible:false;
+    const order=entry?entry.order:w.defaultOrder;
+    const size=entry?entry.size:w.defaultSize;
+    const row=document.createElement('div');
+    row.className='wp-row';
+    row.dataset.widgetId=w.id;
+    const regionOpts=['left','right','hidden'].map(r=>{
+      const dis=(r!=='hidden'&&!w.allowedRegions.includes(r))?'disabled':'';
+      return `<option value="${r}" ${region===r?'selected':''} ${dis}>${r}</option>`;
+    }).join('');
+    const sizeOpts=['collapsed','small','medium','large','full'].map(s=>`<option value="${s}" ${size===s?'selected':''}>${s}</option>`).join('');
+    row.innerHTML=
+      '<div class="wp-info">'+
+        '<div class="wp-name">'+w.label+(w.locked?' <span class="wp-lock" title="locked">🔒</span>':'')+'</div>'+
+        '<div class="wp-desc">'+(w.description||'')+'</div>'+
+      '</div>'+
+      '<label class="wp-toggle"><input class="wp-vis" type="checkbox" '+(visible?'checked':'')+' onchange="setWidgetPlacementOption(\''+w.id+'\',\'visible\',this.checked)"> show</label>'+
+      '<select class="wp-region" onchange="setWidgetPlacementOption(\''+w.id+'\',\'region\',this.value)" '+(w.locked?'disabled':'')+'>'+regionOpts+'</select>'+
+      '<input class="wp-order" type="number" min="1" max="99" value="'+order+'" onchange="setWidgetPlacementOption(\''+w.id+'\',\'order\',this.value)">'+
+      '<select class="wp-size" onchange="setWidgetPlacementOption(\''+w.id+'\',\'size\',this.value)">'+sizeOpts+'</select>';
+    list.appendChild(row);
+  });
+}
 loadUiLayout();
+loadPanelLayout();
+loadWidgetPlacement();
 initTooltips();
 buildRightPanel();
 document.getElementById("inp-color").addEventListener("mousedown",()=>{if(selItem)pushUndo();});

@@ -8,8 +8,22 @@
 /* ── Menu Bar ─────────────────────────────────────────────── */
 .menu-bar{height:var(--menu-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:0;flex-shrink:0;z-index:100}
 .app-logo{font-size:12px;font-weight:700;color:var(--accent);padding:0 12px 0 4px;letter-spacing:.5px;border-right:1px solid var(--border);margin-right:4px}
-.menu-item{padding:0 10px;height:var(--menu-h);display:flex;align-items:center;font-size:12px;color:var(--text2);cursor:pointer;border-radius:4px;white-space:nowrap;transition:background .1s,color .1s}
+.menu-item{padding:0 10px;height:var(--menu-h);display:flex;align-items:center;font-size:12px;color:var(--text2);cursor:pointer;border-radius:4px;white-space:nowrap;transition:background .1s,color .1s;position:relative;user-select:none}
 .menu-item:hover,.menu-item.active{background:var(--surface3);color:var(--text)}
+/* ── Dropdown menus ───────────────────────────────────────── */
+.dropdown{display:none;position:absolute;top:100%;left:0;background:var(--surface2);border:1px solid var(--border);border-radius:6px;min-width:220px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:200}
+.menu-item.active .dropdown{display:block}
+.dd-item{padding:5px 16px;font-size:12px;color:var(--text2);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .08s,color .08s;white-space:nowrap;position:relative}
+.dd-item:hover{background:var(--accent);color:#fff}
+.dd-item.danger{color:var(--red)}
+.dd-item.danger:hover{background:rgba(255,69,58,.18);color:var(--red)}
+.dd-sep{height:1px;background:var(--border);margin:4px 0}
+.dd-item .shortcut{margin-left:auto;font-size:10px;color:var(--text3);flex-shrink:0}
+.dd-item:hover .shortcut{color:rgba(255,255,255,.6)}
+.dd-submenu-trigger::after{content:"▶";margin-left:auto;font-size:9px;color:var(--text3)}
+.dd-item:hover.dd-submenu-trigger::after{color:rgba(255,255,255,.7)}
+.dd-submenu{display:none;position:absolute;left:100%;top:-4px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;min-width:200px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.dd-item:hover>.dd-submenu{display:block}
 .menu-item.phase-badge{margin-left:auto;background:rgba(10,132,255,.12);color:#34aadc;font-size:10px;border:1px solid rgba(10,132,255,.25);border-radius:20px;padding:0 10px;cursor:default}
 /* ── Ribbon ───────────────────────────────────────────────── */
 .ribbon{height:var(--ribbon-h);background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:2px;flex-shrink:0;overflow-x:auto;overflow-y:hidden;z-index:90}

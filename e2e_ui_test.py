@@ -1623,6 +1623,153 @@ def _test_real_pdf_multipage_persistence(page):
     }
 
 
+def _test_menu_power_up(page):
+    """Step 6 assertions: menu structure, keyboard shortcuts, layer helpers, per-page layer memory."""
+    _upload_and_start(page, VECTOR_PDF)
+    _wait_analyse_ready(page)
+
+    # ── 1. Menu structure ────────────────────────────────────────────────────
+    menu_counts = page.evaluate("""() => {
+        const menus = ['project','scale','page','measure','object','layer'];
+        const out = {};
+        for (const m of menus) {
+            const dd = document.getElementById('dd-'+m);
+            out[m] = dd ? dd.querySelectorAll(':scope > .dd-item, :scope > .dd-submenu-trigger').length : -1;
+        }
+        return out;
+    }""")
+    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 19, "object": 7, "layer": 11}
+    menuStructureOk = all(menu_counts.get(m) == expected_counts[m] for m in expected_counts)
+
+    # ── 2. No disabled items ─────────────────────────────────────────────────
+    noDisabledItems = page.evaluate(
+        "() => document.querySelectorAll('#menuBar .dd-item.disabled').length === 0"
+    )
+
+    # ── 3. Menu click opens ──────────────────────────────────────────────────
+    page.locator('[data-menu="project"]').click()
+    page.wait_for_timeout(80)
+    menuClickOpens = page.evaluate(
+        "() => document.querySelector('[data-menu=\"project\"]').classList.contains('active')"
+    )
+
+    # ── 4. Click-outside closes ──────────────────────────────────────────────
+    page.mouse.click(700, 700)
+    page.wait_for_timeout(80)
+    clickOutsideCloses = page.evaluate(
+        "() => !document.querySelector('[data-menu=\"project\"]').classList.contains('active')"
+    )
+
+    # ── 5. Keyboard B → area/building ───────────────────────────────────────
+    page.evaluate("setMode('sel')")
+    page.wait_for_timeout(50)
+    page.keyboard.press("b")
+    page.wait_for_timeout(100)
+    kb_b = page.evaluate("() => ({mode, curAType})")
+    keyboardB = kb_b.get("mode") == "area" and kb_b.get("curAType") == "building"
+
+    # ── 6. Keyboard Shift+O toggles ortho ────────────────────────────────────
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(50)
+    ortho_before = page.evaluate("() => orthoMode")
+    page.keyboard.press("Shift+o")
+    page.wait_for_timeout(100)
+    ortho_after = page.evaluate("() => orthoMode")
+    keyboardShiftO = ortho_after != ortho_before
+
+    # ── 7. E key toggles ep snap ─────────────────────────────────────────────
+    snap_before = page.evaluate("() => snapModes.ep")
+    page.keyboard.press("e")
+    page.wait_for_timeout(100)
+    snap_after = page.evaluate("() => snapModes.ep")
+    snapToggleE = snap_after != snap_before
+
+    # ── 8. F2 with no selection shows status ─────────────────────────────────
+    page.evaluate("selItem = null")
+    page.keyboard.press("F2")
+    page.wait_for_timeout(100)
+    f2_status = page.evaluate("() => document.getElementById('status').textContent")
+    keyboardF2 = "เลือก" in f2_status
+
+    # ── 9. PgUp on single-page PDF shows no-prev status ──────────────────────
+    page.keyboard.press("PageUp")
+    page.wait_for_timeout(100)
+    pgu_status = page.evaluate("() => document.getElementById('status').textContent")
+    keyboardPgUp = "ไม่มีหน้าก่อนหน้า" in pgu_status
+
+    # ── 10. soloLayer hides other layers ─────────────────────────────────────
+    page.evaluate("setAllLayersVisible(true)")
+    page.wait_for_timeout(50)
+    page.evaluate("soloLayer('sub_area')")
+    page.wait_for_timeout(100)
+    layer_vis = page.evaluate("() => ({...layerVis})")
+    soloLayerWorks = (
+        layer_vis.get("sub_area") is True
+        and not all(layer_vis.values())
+        and layer_vis.get("base_area") is False
+    )
+
+    # ── 11. lockOtherLayers locks non-active layers ──────────────────────────
+    page.evaluate("setAllLayersLocked(false)")
+    page.wait_for_timeout(50)
+    page.evaluate("lockOtherLayers('sub_area')")
+    page.wait_for_timeout(100)
+    layer_lock = page.evaluate("() => ({...layerLock})")
+    lockOthersWorks = (
+        layer_lock.get("sub_area") is False
+        and layer_lock.get("base_area") is True
+    )
+
+    # ── 12. selectAllInLayer with 0 polys → status mentions "0" ──────────────
+    page.evaluate("mPolys = []; mOpenings = []; mLines = []; mRefs = []")
+    page.evaluate("selectAllInLayer('sub_area')")
+    page.wait_for_timeout(100)
+    sel_status = page.evaluate("() => document.getElementById('status').textContent")
+    selectAllInLayerWorks = "เลือก" in sel_status and "sub_area" in sel_status
+
+    # ── 13. validateAllPolygons with no polys → ok status ────────────────────
+    page.evaluate("validateAllPolygons()")
+    page.wait_for_timeout(100)
+    val_status = page.evaluate("() => document.getElementById('status').textContent")
+    validatePolygonsWarns = "ไม่พบ polygon" in val_status
+
+    # ── 14. Per-page layer memory bug fix (multi-page only) ──────────────────
+    perPageLayerMemoryFixed = None
+    if REAL_PDF.exists():
+        _upload_and_start(page, REAL_PDF)
+        _wait_analyse_ready(page)
+        # Hide base_area on page 1
+        page.evaluate("hideLayer('base_area')")
+        page.wait_for_timeout(100)
+        vis_p1_before = page.evaluate("() => layerVis.base_area")
+        # Go to page 2
+        page.evaluate("() => { const n = getNextPage(curPage); if(n) loadPage(n); }")
+        page.wait_for_timeout(600)
+        # Come back to page 1
+        page.evaluate("() => { const p = getPrevPage(curPage); if(p) loadPage(p); }")
+        page.wait_for_timeout(600)
+        vis_p1_after = page.evaluate("() => layerVis.base_area")
+        perPageLayerMemoryFixed = vis_p1_before is False and vis_p1_after is False
+
+    return {
+        "menuCounts": menu_counts,
+        "menuStructureOk": menuStructureOk,
+        "noDisabledItems": noDisabledItems,
+        "menuClickOpens": menuClickOpens,
+        "clickOutsideCloses": clickOutsideCloses,
+        "keyboardB": keyboardB,
+        "keyboardShiftO": keyboardShiftO,
+        "snapToggleE": snapToggleE,
+        "keyboardF2": keyboardF2,
+        "keyboardPgUp": keyboardPgUp,
+        "soloLayerWorks": soloLayerWorks,
+        "lockOthersWorks": lockOthersWorks,
+        "selectAllInLayerWorks": selectAllInLayerWorks,
+        "validatePolygonsWarns": validatePolygonsWarns,
+        "perPageLayerMemoryFixed": perPageLayerMemoryFixed,
+    }
+
+
 def main():
     mode = (sys.argv[1] if len(sys.argv) > 1 else "full").lower()
     if mode not in {"full", "smoke"}:
@@ -1650,6 +1797,7 @@ def main():
             selection_helpers = _test_selection_and_area_type_helpers(page)
             setback_helpers = _test_setback_helpers(page)
             extended_helpers = _test_extended_measurement_helpers(page)
+            menu_power_up = _test_menu_power_up(page)
             if mode == "full":
                 real_persist = _test_real_pdf_multipage_persistence(page)
                 real_pdf = _test_real_pdf_navigation_rotate_export(page, download_dir)
@@ -1669,6 +1817,7 @@ def main():
         print("SELECT_OK", selection_helpers)
         print("SETBACK_OK", setback_helpers)
         print("EXT_MEASURE_OK", extended_helpers)
+        print("MENU_OK", menu_power_up)
         if mode == "full":
             print("ANNOT_OK", annotated)
             print("PERSIST_OK", real_persist)

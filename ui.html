@@ -19,12 +19,119 @@
     <div class="menu-item" data-menu="file">File</div>
     <div class="menu-item" data-menu="edit">Edit</div>
     <div class="menu-item" data-menu="view">View</div>
-    <div class="menu-item" data-menu="project">Project</div>
-    <div class="menu-item" data-menu="scale">Scale</div>
-    <div class="menu-item" data-menu="page">Page</div>
-    <div class="menu-item" data-menu="measure">Measure</div>
-    <div class="menu-item" data-menu="object">Object</div>
-    <div class="menu-item" data-menu="layer">Layer</div>
+    <div class="menu-item" data-menu="project" onclick="toggleMenu(this)">Project
+      <div class="dropdown" id="dd-project">
+        <div class="dd-item" onclick="openSetup()">📋 Project Info</div>
+        <div class="dd-item" onclick="showSummaryWidget();switchSWTab('area')">📊 Project Summary</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="saveProject()">💾 Save Project<span class="shortcut">Ctrl+S</span></div>
+        <div class="dd-item" onclick="openProjectBtnClick()">📁 Open Project<span class="shortcut">Ctrl+O</span></div>
+      </div>
+    </div>
+    <div class="menu-item" data-menu="scale" onclick="toggleMenu(this)">Scale
+      <div class="dropdown" id="dd-scale">
+        <div class="dd-item" onclick="setMode('calib')">📏 Set Scale Current Page<span class="shortcut">S</span></div>
+        <div class="dd-item" onclick="openScaleManager()">📊 Scale Manager</div>
+        <div class="dd-item" onclick="verifyScale()">✓ Verify Scale</div>
+        <div class="dd-item" onclick="resetPageScale(curPage)">🔄 Reset Page Scale</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="openScaleManager()">Scale Status by Page</div>
+        <div class="dd-item" onclick="toggleScaleLine()">Show Scale Line</div>
+        <div class="dd-item" onclick="showSummaryWidget();switchSWTab('warn')">⚠ Scale Warning</div>
+      </div>
+    </div>
+    <div class="menu-item" data-menu="page" onclick="toggleMenu(this)">Page
+      <div class="dropdown" id="dd-page">
+        <div class="dd-item" onclick="openPageManager()">📄 Page Manager</div>
+        <div class="dd-item" onclick="openSetup()">🏷 Set Page Type / Floor / Label</div>
+        <div class="dd-item" onclick="triggerSetupAutoTag()">Auto Name Pages</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="menuLoadPrevPage()">◀ Previous Page<span class="shortcut">PgUp</span></div>
+        <div class="dd-item" onclick="menuLoadNextPage()">▶ Next Page<span class="shortcut">PgDn</span></div>
+        <div class="dd-item" onclick="rotatePage(-90)">↺ Rotate 90° CCW</div>
+        <div class="dd-item" onclick="rotatePage(90)">↻ Rotate 90° CW</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="showSummaryWidget();switchSWTab('floor')">📊 Page Summary</div>
+      </div>
+    </div>
+    <div class="menu-item" data-menu="measure" onclick="toggleMenu(this)">Measure
+      <div class="dropdown" id="dd-measure">
+        <div class="dd-item" onclick="setMode('sel')">↖ Select<span class="shortcut">V</span></div>
+        <div class="dd-item" onclick="setMode('pan')">✋ Pan<span class="shortcut">H</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="activateAreaTool('room')">⬡ Area (Polygon)<span class="shortcut">A</span></div>
+        <div class="dd-item" onclick="toggleOpening()">Opening / Deduction<span class="shortcut">O</span></div>
+        <div class="dd-item" onclick="activateAreaTool('land')">Land / Site Boundary<span class="shortcut">L</span></div>
+        <div class="dd-item" onclick="activateAreaTool('building')">Building Footprint<span class="shortcut">B</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="setMode('dist')">Dimension<span class="shortcut">D</span></div>
+        <div class="dd-item" onclick="setMode('path')">Path / Continuous Distance<span class="shortcut">Shift+D</span></div>
+        <div class="dd-item" onclick="setMode('ref')">Reference Line<span class="shortcut">R</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="setMode('north')">↑ North Arrow<span class="shortcut">N</span></div>
+        <div class="dd-item" onclick="setMode('parking')">Parking<span class="shortcut">P</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item dd-submenu-trigger">Snap Modes
+          <div class="dd-submenu" id="dd-snap-submenu">
+            <div class="dd-item" onclick="toggleSnap('ep')">Endpoint<span class="shortcut">E</span></div>
+            <div class="dd-item" onclick="toggleSnap('mp')">Midpoint<span class="shortcut">M</span></div>
+            <div class="dd-item" onclick="toggleSnap('ct')">Center<span class="shortcut">C</span></div>
+            <div class="dd-item" onclick="toggleSnap('nl')">Nearest Line</div>
+            <div class="dd-item" onclick="toggleSnap('ix')">Intersection</div>
+            <div class="dd-item" onclick="togglePerp()">Perpendicular<span class="shortcut">⌘P</span></div>
+            <div class="dd-item" onclick="toggleSnap('off')">Disable All Snaps</div>
+          </div>
+        </div>
+        <div class="dd-item" onclick="toggleOrtho()">Ortho Mode (0°/90°)<span class="shortcut">Shift+O</span></div>
+        <div class="dd-item" onclick="toggleLoupe()">Loupe Magnifier<span class="shortcut">Shift+L</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="toggleRefDistance()">Show Reference Distances</div>
+        <div class="dd-item" onclick="toggleSetbackDistance()">Show Setback Distances</div>
+        <div class="dd-item" onclick="validateAllPolygons()">Validate Polygons</div>
+        <div class="dd-item" onclick="clearMeasures()">Clear Current Page</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="finishCurrentArea()">Finish Drawing<span class="shortcut">Enter</span></div>
+      </div>
+    </div>
+    <div class="menu-item" data-menu="object" onclick="toggleMenu(this)">Object
+      <div class="dropdown" id="dd-object">
+        <div class="dd-item" onclick="focusPropertiesTab()">Object Properties</div>
+        <div class="dd-item" onclick="renameSelectedObject()">Rename Object<span class="shortcut">F2</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="focusPropertiesTab();scrollToRpField('useCategory')">Change Category</div>
+        <div class="dd-item" onclick="focusPropertiesTab();scrollToRpField('semanticTag')">Change Semantic Tag</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="focusPropertiesTab();scrollToRpField('parentLink')">Link Opening to Area</div>
+        <div class="dd-item" onclick="unlinkSelectedOpening()">Unlink Opening</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item danger" onclick="deleteSelectedObject()">Delete Object<span class="shortcut">Del</span></div>
+      </div>
+    </div>
+    <div class="menu-item" data-menu="layer" onclick="toggleMenu(this)">Layer
+      <div class="dropdown" id="dd-layer">
+        <div class="dd-item dd-submenu-trigger">Set Active Layer
+          <div class="dd-submenu" id="dd-layer-submenu">
+            <div class="dd-item" onclick="setActiveLayerMenu('sub_area')">พื้นที่ย่อย (sub_area)</div>
+            <div class="dd-item" onclick="setActiveLayerMenu('base_area')">พื้นที่หลัก (base_area)</div>
+            <div class="dd-item" onclick="setActiveLayerMenu('deduction')">ช่องเปิด (deduction)</div>
+            <div class="dd-item" onclick="setActiveLayerMenu('reference_geometry')">อ้างอิง (reference_geometry)</div>
+          </div>
+        </div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="showLayer(getActiveLayer())">Show Active Layer</div>
+        <div class="dd-item" onclick="hideLayer(getActiveLayer())">Hide Active Layer</div>
+        <div class="dd-item" onclick="lockLayer(getActiveLayer())">Lock Active Layer</div>
+        <div class="dd-item" onclick="unlockLayer(getActiveLayer())">Unlock Active Layer</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="soloLayer(getActiveLayer())">Solo Active Layer</div>
+        <div class="dd-item" onclick="setAllLayersVisible(true)">Show All Layers</div>
+        <div class="dd-item" onclick="hideOtherLayers(getActiveLayer())">Hide Other Layers</div>
+        <div class="dd-item" onclick="lockOtherLayers(getActiveLayer())">Lock All Other Layers</div>
+        <div class="dd-item" onclick="setAllLayersLocked(false)">Unlock All Layers</div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" onclick="selectAllInLayer(getActiveLayer())">Select All in Active Layer</div>
+      </div>
+    </div>
     <div class="menu-item" data-menu="review">Review</div>
     <div class="menu-item" data-menu="export">Export</div>
     <div class="menu-item" data-menu="workspace">Workspace</div>
@@ -371,6 +478,7 @@ function _syncPageLayersToGlobals(pageIndex){
   _bmaCC._syncPageLayersToGlobals++;
   const layers=ensurePageLayers(pageIndex);
   layers.forEach(l=>{
+    if(l._userModified)return;
     if(Object.prototype.hasOwnProperty.call(layerVis,l.slug)) layerVis[l.slug]=l.visible;
     if(Object.prototype.hasOwnProperty.call(layerLock,l.slug))layerLock[l.slug]=l.locked;
   });
@@ -1218,8 +1326,10 @@ ws.addEventListener("mouseleave",()=>{isPan=false;dragState=null;snapCur.style.d
 // ══════════════════════════════════════════════════════
 function toggleToolbarMore(e){if(e)e.stopPropagation();const menu=document.getElementById("toolbar-more-menu"),btn=document.getElementById("toolbar-more-btn");const open=!menu.classList.contains("open");menu.classList.toggle("open",open);btn.classList.toggle("active",open);}
 function closeToolbarMore(){document.getElementById("toolbar-more-menu")?.classList.remove("open");document.getElementById("toolbar-more-btn")?.classList.remove("active");}
+function closeAllMenus(){document.querySelectorAll("#menuBar .menu-item.active").forEach(m=>m.classList.remove("active"));}
+function toggleMenu(el){const wasActive=el.classList.contains("active");closeAllMenus();if(!wasActive)el.classList.add("active");}
 document.getElementById("toolbar-more")?.addEventListener("click",e=>e.stopPropagation());
-document.addEventListener("click",e=>{if(!e.target.closest("#toolbar-more"))closeToolbarMore();});
+document.addEventListener("click",e=>{if(!e.target.closest("#toolbar-more"))closeToolbarMore();if(!e.target.closest("#menuBar .menu-item"))closeAllMenus();});
 function updateAreaToolbarState(){document.getElementById("btn-area")?.classList.toggle("active",mode==="area"&&!openingMode&&curAType!=="land");document.getElementById("btn-parcel-boundary")?.classList.toggle("active",mode==="area"&&!openingMode&&curAType==="land");document.getElementById("btn-opening")?.classList.toggle("active",mode==="area"&&openingMode);}
 function activateAreaTool(type="room"){openingMode=false;setAType(type);setMode("area");setStatus(type==="land"?"ที่ดิน: คลิกหลายจุดเพื่อวาดกรอบที่ดิน":"พื้นที่: คลิกหลายจุดเพื่อวาด polygon");}
 function activateOpeningTool(){openingMode=true;setMode("area");setStatus("ช่องเปิด: คลิกหลายจุดเพื่อวาดพื้นที่หักออก");}
@@ -1240,14 +1350,39 @@ function hitTest(cx,cy){const THR=12/zoom;for(let i=mParking.length-1;i>=0;i--){
 function hitTestAll(cx,cy){const THR=12/zoom;const hits=[];const seen=new Set();const addHit=(h)=>{const k=h.type+":"+h.idx;if(!seen.has(k)){seen.add(k);hits.push(h);}};for(let i=mParking.length-1;i>=0;i--){const p=mParking[i],c=pdfToC(p.x,p.y);if(Math.hypot(cx-c.x,cy-c.y)<THR)addHit({type:"parking",idx:i});}if(layerVis.reference_geometry&&!layerLock.reference_geometry)for(let i=mRefs.length-1;i>=0;i--){for(const seg of lineSegments(mRefs[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"ref",idx:i});break;}}}for(let i=mOpenings.length-1;i>=0;i--){const op=mOpenings[i];if(!op.closed||layerLock.deduction)continue;const cp=op.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)addHit({type:"opening",idx:i});}const polyHits=[];for(let i=mPolys.length-1;i>=0;i--){const poly=mPolys[i];if(!poly.closed)continue;const _pl2=areaTypeLayer(poly.areaType);if(layerLock[_pl2])continue;const cp=poly.pts.map(p=>pdfToC(p.x,p.y));let hit=ptInPoly(cx,cy,cp);if(!hit)for(let j=0;j<cp.length;j++){const nj=(j+1)%cp.length;if(distToSeg(cx,cy,cp[j].x,cp[j].y,cp[nj].x,cp[nj].y)<THR){hit=true;break;}}if(hit)polyHits.push({type:"poly",idx:i,_area:polyCanvasAreaPx(cp)});}polyHits.sort((a,b)=>a._area-b._area);polyHits.forEach(h=>addHit(h));for(let i=mLines.length-1;i>=0;i--){for(const seg of lineSegments(mLines[i])){const a=pdfToC(seg.a.x,seg.a.y),b=pdfToC(seg.b.x,seg.b.y);if(distToSeg(cx,cy,a.x,a.y,b.x,b.y)<THR){addHit({type:"line",idx:i});break;}}}return hits;}
 function showObjPicker(hits,ex,ey){const picker=document.getElementById("obj-picker");const rows=document.getElementById("obj-picker-rows");rows.innerHTML="";hits.forEach(hit=>{const obj=selectedObj(hit);if(!obj)return;let icon="⬡",name="",area="",typeLabel="";if(hit.type==="opening"){icon="🕳";name=obj.name||"ช่องว่าง";const a=polyAreaM2(obj.pts);area=a!=null?"−"+a.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="poly"){icon=areaTypeLayer(obj.areaType)==="base_area"?"🏗":"📐";name=obj.name||(AREA_TYPE_LABELS[obj.areaType]||"พื้นที่");typeLabel=AREA_TYPE_LABELS[obj.areaType]||"";const m=polyMetrics(obj,curPage);area=m.area!=null?m.area.toFixed(2)+" ตร.ม.":"";}else if(hit.type==="ref"){icon="⌁";name=obj.name||(REF_LABELS&&REF_LABELS[obj.refType])||"เส้นอ้างอิง";}else if(hit.type==="parking"){icon="🚗";name=(PARKING_LABELS&&PARKING_LABELS[obj.parkingType])||"ที่จอด";}else if(hit.type==="line"){icon="📏";name="ระยะ";}const div=document.createElement("div");div.className="opkr-row";div.innerHTML=`<span class="opkr-icon">${icon}</span><span class="opkr-name">${name||"—"}</span><span class="opkr-area">${area}</span>`;div.addEventListener("click",()=>{selItem={type:hit.type,idx:hit.idx};syncColorBar(selItem);hideObjPicker();setSidebarMode("properties");redraw();buildRightPanel();setStatus(`เลือก ${icon} ${name||hit.type} idx ${hit.idx}`);});rows.appendChild(div);});const pw=240;let lx=ex+10,ly=ey+10;if(lx+pw>window.innerWidth-10)lx=ex-pw-10;if(ly+hits.length*36+44>window.innerHeight-10)ly=ey-hits.length*36-50;picker.style.left=lx+"px";picker.style.top=ly+"px";picker.style.display="block";ignoreNextObjPickerDocumentClick=true;}
 function hideObjPicker(){document.getElementById("obj-picker").style.display="none";}
-function toggleLayer(lyr){layerVis[lyr]=!layerVis[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl)pl.visible=layerVis[lyr];redraw();buildRightPanel();}
-function toggleLayerLock(lyr){layerLock[lyr]=!layerLock[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl)pl.locked=layerLock[lyr];if(selItem){const obj=selectedObj(selItem);if(obj){const lt=selItem.type==="poly"?areaTypeLayer(obj.areaType):selItem.type==="opening"?"deduction":selItem.type==="ref"?"reference_geometry":null;if(lt&&layerLock[lt]){selItem=null;dragState=null;}}}redraw();buildRightPanel();}
+function toggleLayer(lyr){layerVis[lyr]=!layerVis[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl){pl.visible=layerVis[lyr];pl._userModified=true;}redraw();buildRightPanel();}
+function toggleLayerLock(lyr){layerLock[lyr]=!layerLock[lyr];const pl=getLayerBySlug(curPage,lyr);if(pl){pl.locked=layerLock[lyr];pl._userModified=true;}if(selItem){const obj=selectedObj(selItem);if(obj){const lt=selItem.type==="poly"?areaTypeLayer(obj.areaType):selItem.type==="opening"?"deduction":selItem.type==="ref"?"reference_geometry":null;if(lt&&layerLock[lt]){selItem=null;dragState=null;}}}redraw();buildRightPanel();}
 function toggleOrtho(){orthoMode=!orthoMode;document.getElementById("btn-ortho").classList.toggle("active",orthoMode);setStatus(orthoMode?"⊖ ตั้งฉากเสมอ: เปิด — วาดล็อก 0°/90° ตลอด":"⊖ ตั้งฉากเสมอ: ปิด");}
 function finishCurrentArea(){if(mPts.length<3){setStatus("polygon ต้องมีอย่างน้อย 3 จุด");return;}if(polySelfIntersects(mPts)){setStatus("polygon ตัดกันเอง");return;}const area=polyAreaM2(mPts);pushUndo();if(openingMode){const op={pts:[...mPts],closed:true,name:"",id:newObjectId("opening"),color:curColor,opacity:curOpacity,semanticTag:"deduction_opening",useCategory:null};linkOpeningParent(op,mPolys);assignDefaultObjectLayer(curPage,op);mOpenings.push(op);if(area!=null)document.getElementById("measure-result").textContent=`⬡ ช่องว่าง ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อช่องว่าง",(nm)=>{op.name=nm;linkOpeningParent(op,mPolys);updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",false);}else{const at=curAType||"room";const poly={pts:[...mPts],closed:true,name:"",areaType:at,id:newObjectId("area"),color:curColor,opacity:curOpacity,semanticTag:defaultSemanticTag("poly",{areaType:at}),useCategory:null};assignDefaultObjectLayer(curPage,poly);const polyIdx=mPolys.length;mPolys.push(poly);linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(area!=null)document.getElementById("measure-result").textContent=`⬡ ${area.toFixed(2)} ตร.ม.`;mPts=[];openNamePanel("ชื่อพื้นที่",(nm,type)=>{poly.name=nm;const oldTag=poly.semanticTag;poly.areaType=type||poly.areaType||"room";const nextTag=defaultSemanticTag("poly",poly);if(oldTag===defaultSemanticTag("poly",{areaType:at}))poly.semanticTag=nextTag;normalizeSemanticFields(poly,"poly");linkOpeningsInStore({polys:mPolys,openings:mOpenings});if(poly.areaType==="land"){ensureLandEdgeTags(poly);setTimeout(()=>openLandEdgePanel(polyIdx),0);}updatePageSummary(curPage);updateWorkspaceState();redraw();buildRightPanel();},"",true,at);}updatePageSummary(curPage);updateWorkspaceState();buildRightPanel();}
 function updateDrawBar(){const bar=document.getElementById("draw-bar");const inDraw=["dist","path","ref","area"].includes(mode);bar.style.display=(inDraw&&mPts.length>0)?"flex":"none";if(inDraw&&mPts.length>0){const canFinish=(mode==="path"&&mPts.length>=2)||(mode==="ref"&&mPts.length>=2)||(mode==="area"&&mPts.length>=3);document.getElementById("dbar-finish").disabled=!canFinish;document.getElementById("dbar-pts").textContent=mPts.length+" จุด";}}
 function drawBarFinish(){if(mode==="path"||mode==="ref")finishPathLike(mode==="ref"?"ref":"path");else if(mode==="area"&&mPts.length>=3)finishCurrentArea();updateDrawBar();redraw();}
 function drawBarUndoPt(){if(mPts.length>0){mPts.pop();setStatus(mPts.length?`↩ ลบจุดที่ ${mPts.length+1} — เหลือ ${mPts.length} จุด`:"ยกเลิกจุดทั้งหมด");updateDrawBar();redraw();}}
 function drawBarCancel(){mPts=[];setStatus("ยกเลิก");updateDrawBar();redraw();}
+// ── Menu helpers ───────────────────────────────────────────
+function menuLoadPrevPage(){const p=getPrevPage(curPage);if(p)loadPage(p);else setStatus("ไม่มีหน้าก่อนหน้า");}
+function menuLoadNextPage(){const n=getNextPage(curPage);if(n)loadPage(n);else setStatus("ไม่มีหน้าถัดไป");}
+function verifyScale(){openScaleManager();}
+function resetPageScale(pg){const s=getStore(pg||curPage);if(s.calibScale){delete s.calibScale;if(analyseCache[analyseKey(pg||curPage)])analyseCache[analyseKey(pg||curPage)].scale=null;if(pageData)pageData.scale=null;updateWorkspaceState();buildRightPanel();setStatus("ล้าง Scale หน้า "+(pg||curPage)+" แล้ว");}else{setStatus("หน้านี้ยังไม่มี Scale ที่จะล้าง");}}
+function toggleScaleLine(){const pg=curPage;const s=getStore(pg);s.showScaleLine=!s.showScaleLine;setStatus(s.showScaleLine?"แสดงเส้น Scale":"ซ่อนเส้น Scale");redraw();}
+function triggerSetupAutoTag(){openSetup();setTimeout(()=>document.getElementById("setup-auto-btn")?.click(),200);}
+function focusPropertiesTab(){setSidebarMode("properties");}
+function scrollToRpField(fieldName){setSidebarMode("properties");setTimeout(()=>{const el=document.querySelector(`[data-rp-field="${fieldName}"]`);if(el)el.scrollIntoView({behavior:"smooth",block:"center"});},100);}
+function renameSelectedObject(){if(!selItem){setStatus("เลือก object ก่อน");return;}const obj=selectedObj(selItem);if(!obj){setStatus("ไม่พบ object ที่เลือก");return;}openNamePanel("เปลี่ยนชื่อ",(nm,at)=>{pushUndo();obj.name=nm;if(at&&selItem.type==="poly")obj.areaType=at;updatePageSummary(curPage);redraw();buildRightPanel();},obj.name||"",selItem.type==="poly",selItem.type==="poly"?obj.areaType:null);}
+function unlinkSelectedOpening(){if(!selItem||selItem.type!=="opening"){setStatus("เลือก opening ก่อน");return;}const obj=selectedObj(selItem);if(!obj){return;}pushUndo();delete obj.parentId;delete obj.parentStatus;delete obj.parentManual;updatePageSummary(curPage);redraw();buildRightPanel();setStatus("ยกเลิกการเชื่อม opening แล้ว");}
+function validateAllPolygons(){const issues=[];const all=[...mPolys,...mOpenings];all.forEach((p,i)=>{if(p.pts&&p.pts.length>=3&&polySelfIntersects(p.pts)){const name=p.name||(i<mPolys.length?`Poly ${i}`:`Opening ${i-mPolys.length}`);issues.push({page:curPage,objId:p.id||"",name});}});if(!issues.length){setStatus("✓ ไม่พบ polygon ที่มีปัญหา");return;}issues.forEach(is=>setStatus(`⚠ ${is.name}: เส้นตัดกัน — แก้ไขก่อนส่งออก`));showSummaryWidget();switchSWTab("warn");setStatus(`⚠ พบ ${issues.length} polygon ที่มีปัญหา`);}
+// ── Layer menu helpers ─────────────────────────────────────
+function getActiveLayer(){return document.getElementById("active-layer-select")?.value||"sub_area";}
+function setActiveLayerMenu(slug){const sel=document.getElementById("active-layer-select");if(sel){sel.value=slug;sel.dispatchEvent(new Event("change"));}closeAllMenus();}
+function showLayer(slug){layerVis[slug]=true;const pl=getLayerBySlug(curPage,slug);if(pl){pl.visible=true;pl._userModified=true;}redraw();buildRightPanel();}
+function hideLayer(slug){layerVis[slug]=false;const pl=getLayerBySlug(curPage,slug);if(pl){pl.visible=false;pl._userModified=true;}redraw();buildRightPanel();}
+function lockLayer(slug){layerLock[slug]=true;const pl=getLayerBySlug(curPage,slug);if(pl){pl.locked=true;pl._userModified=true;}redraw();buildRightPanel();}
+function unlockLayer(slug){layerLock[slug]=false;const pl=getLayerBySlug(curPage,slug);if(pl){pl.locked=false;pl._userModified=true;}redraw();buildRightPanel();}
+function soloLayer(slug){Object.keys(layerVis).forEach(k=>{layerVis[k]=k===slug;});ensurePageLayers(curPage).forEach(l=>{l.visible=l.slug===slug;l._userModified=true;});redraw();buildRightPanel();setStatus("Solo: "+slug);}
+function setAllLayersVisible(b){Object.keys(layerVis).forEach(k=>{layerVis[k]=b;});ensurePageLayers(curPage).forEach(l=>{l.visible=b;l._userModified=true;});redraw();buildRightPanel();}
+function hideOtherLayers(slug){Object.keys(layerVis).forEach(k=>{layerVis[k]=k===slug;});ensurePageLayers(curPage).forEach(l=>{l.visible=l.slug===slug;l._userModified=true;});redraw();buildRightPanel();}
+function lockOtherLayers(slug){Object.keys(layerLock).forEach(k=>{layerLock[k]=k!==slug;});ensurePageLayers(curPage).forEach(l=>{l.locked=l.slug!==slug;l._userModified=true;});redraw();buildRightPanel();}
+function setAllLayersLocked(b){Object.keys(layerLock).forEach(k=>{layerLock[k]=b;});ensurePageLayers(curPage).forEach(l=>{l.locked=b;l._userModified=true;});redraw();buildRightPanel();}
+function selectAllInLayer(slug){selItem=null;dragState=null;const matches=[];mPolys.forEach((p,i)=>{if(areaTypeLayer(p.areaType)===slug)matches.push({type:"poly",idx:i});});mOpenings.forEach((o,i)=>{if(slug==="deduction")matches.push({type:"opening",idx:i});});mLines.forEach((l,i)=>{if(slug==="labels")matches.push({type:"line",idx:i});});mRefs.forEach((r,i)=>{if(slug==="reference_geometry")matches.push({type:"ref",idx:i});});if(matches.length===1){selItem=matches[0];syncColorBar(selItem);}else if(matches.length>1){selItem=matches[0];syncColorBar(selItem);}buildRightPanel();redraw();setStatus(`เลือก ${matches.length} object ใน layer ${slug}`);}
 document.addEventListener("click",e=>{const picker=document.getElementById("obj-picker");if(ignoreNextObjPickerDocumentClick){ignoreNextObjPickerDocumentClick=false;return;}if(!picker.contains(e.target))hideObjPicker();});
 // ══════════════════════════════════════════════════════
 // Undo
@@ -1365,7 +1500,44 @@ function closeCheckPanel(){document.getElementById('check-panel').classList.remo
 // ══════════════════════════════════════════════════════
 // Keyboard
 // ══════════════════════════════════════════════════════
-document.addEventListener("keydown",e=>{if(e.key==="Shift"&&e.target.tagName!=="INPUT"){shiftDown=true;redraw();return;}if(e.key===" "&&!spaceDown&&e.target.tagName!=="INPUT"){e.preventDefault();spaceDown=true;preSpaceMode=mode;ws.style.cursor="grab";return;}if(e.target.tagName==="INPUT")return;if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();if(mPts.length>0){mPts.pop();setStatus(mPts.length?`↩ ลบจุดที่ ${mPts.length+1} — เหลือ ${mPts.length} จุด`:"ยกเลิกจุดทั้งหมด");redraw();}else{undo();}return;}if(e.key==="Enter"&&(mode==="path"||mode==="ref")&&mPts.length){e.preventDefault();finishPathLike(mode==="ref"?"ref":"path");return;}if(e.key==="ArrowRight"){const n=getNextPage(curPage);if(n)loadPage(n);}if(e.key==="ArrowLeft"){const p=getPrevPage(curPage);if(p)loadPage(p);}if(e.key==="Escape"){if(landEdgeState.open){closeLandEdgePanel();return;}if((mode==="path"||mode==="ref"||mode==="area"||mode==="north")&&mPts.length){mPts=[];redraw();setStatus("ยกเลิกเส้นที่กำลังวาด");return;}setMode("pan");namePanel.style.display="none";ctxMenu.style.display="none";closePgMgr();}if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){pushUndo();if(selItem.type==="line")mLines.splice(selItem.idx,1);else if(selItem.type==="poly")mPolys.splice(selItem.idx,1);else if(selItem.type==="opening")mOpenings.splice(selItem.idx,1);else if(selItem.type==="ref")mRefs.splice(selItem.idx,1);else if(selItem.type==="parking")mParking.splice(selItem.idx,1);selItem=null;dragState=null;updatePageSummary(curPage);redraw();}if(e.key==="f"||e.key==="F")fitToWindow();if(e.key==="Delete"&&ctxTarget)ctxDelete();if(e.key==="b"&&(e.ctrlKey||e.metaKey)){e.preventDefault();toggleSidebar();}});
+document.addEventListener("keydown",e=>{
+  const inInput=["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName);
+  if(e.key==="Shift"&&!inInput){shiftDown=true;redraw();return;}
+  if(e.key===" "&&!spaceDown&&!inInput){e.preventDefault();spaceDown=true;preSpaceMode=mode;ws.style.cursor="grab";return;}
+  if(inInput)return;
+  const anyModal=!!document.querySelector(".setup-overlay.open,#setup-overlay.open,#pgmgr-overlay.open,#scale-mgr-overlay.open,#check-panel.open,#calib-panel[style*=block],#name-panel[style*=block]");
+  if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();if(mPts.length>0){mPts.pop();setStatus(mPts.length?`↩ ลบจุดที่ ${mPts.length+1} — เหลือ ${mPts.length} จุด`:"ยกเลิกจุดทั้งหมด");redraw();}else{undo();}return;}
+  if((e.ctrlKey||e.metaKey)&&e.key==="s"&&!e.shiftKey){e.preventDefault();saveProject();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key==="o"){e.preventDefault();if(!anyModal)openProjectBtnClick();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key==="p"){e.preventDefault();if(!anyModal)togglePerp();return;}
+  if(e.key==="b"&&(e.ctrlKey||e.metaKey)){e.preventDefault();toggleSidebar();return;}
+  if(e.key==="Enter"&&(mode==="path"||mode==="ref")&&mPts.length){e.preventDefault();finishPathLike(mode==="ref"?"ref":"path");return;}
+  if(e.key==="ArrowRight"){const n=getNextPage(curPage);if(n)loadPage(n);}
+  if(e.key==="ArrowLeft"){const p=getPrevPage(curPage);if(p)loadPage(p);}
+  if(e.key==="PageUp"){e.preventDefault();if(!anyModal)menuLoadPrevPage();return;}
+  if(e.key==="PageDown"){e.preventDefault();if(!anyModal)menuLoadNextPage();return;}
+  if(e.key==="Escape"){closeAllMenus();if(landEdgeState.open){closeLandEdgePanel();return;}if((mode==="path"||mode==="ref"||mode==="area"||mode==="north")&&mPts.length){mPts=[];redraw();setStatus("ยกเลิกเส้นที่กำลังวาด");return;}setMode("pan");namePanel.style.display="none";ctxMenu.style.display="none";closePgMgr();}
+  if((e.key==="Delete"||e.key==="Backspace")&&mode==="sel"&&selItem){pushUndo();if(selItem.type==="line")mLines.splice(selItem.idx,1);else if(selItem.type==="poly")mPolys.splice(selItem.idx,1);else if(selItem.type==="opening")mOpenings.splice(selItem.idx,1);else if(selItem.type==="ref")mRefs.splice(selItem.idx,1);else if(selItem.type==="parking")mParking.splice(selItem.idx,1);selItem=null;dragState=null;updatePageSummary(curPage);redraw();}
+  if(e.key==="F2"){if(!anyModal)renameSelectedObject();return;}
+  if(e.key==="Delete"&&ctxTarget)ctxDelete();
+  if(e.key==="f"||e.key==="F")fitToWindow();
+  if(anyModal)return;
+  if(!e.ctrlKey&&!e.metaKey&&!e.altKey){
+    if(e.key==="v"||e.key==="V"){setMode("sel");return;}
+    if(e.key==="h"||e.key==="H"){setMode("pan");return;}
+    if(e.key==="a"||e.key==="A"){activateAreaTool("room");return;}
+    if(e.key==="o"||e.key==="O"){if(e.shiftKey){toggleOrtho();return;}toggleOpening();return;}
+    if(e.key==="l"||e.key==="L"){if(e.shiftKey){toggleLoupe();return;}activateAreaTool("land");return;}
+    if(e.key==="b"||e.key==="B"){activateAreaTool("building");return;}
+    if(e.key==="d"||e.key==="D"){if(e.shiftKey){setMode("path");return;}setMode("dist");return;}
+    if(e.key==="r"||e.key==="R"){setMode("ref");return;}
+    if(e.key==="n"||e.key==="N"){setMode("north");return;}
+    if(e.key==="p"||e.key==="P"){setMode("parking");return;}
+    if(e.key==="e"||e.key==="E"){toggleSnap("ep");return;}
+    if(e.key==="m"||e.key==="M"){toggleSnap("mp");return;}
+    if(e.key==="c"||e.key==="C"){toggleSnap("ct");return;}
+  }
+});
 document.addEventListener("keyup",e=>{if(e.key===" "&&spaceDown){spaceDown=false;ws.style.cursor=mode==="pan"?"grab":mode==="sel"?"default":"crosshair";}if(e.key==="Shift"){shiftDown=false;redraw();}});
 function setStatus(t){document.getElementById("status").textContent=t;}
 window.addEventListener("resize",()=>{if(bgImg)fitToWindow();});

@@ -8,116 +8,109 @@
 </head>
 <body>
 <div id="app">
-  <div id="topbar">
-    <div class="topbar-zone topbar-zone-a">
-      <div class="topbar-brand">
-        <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
-        <span class="brand-mark">BM</span>
-        <div class="brand-copy">
-          <h1>BMA-Plan</h1>
-          <span class="file-info" id="file-info">ยังไม่มีไฟล์</span>
-        </div>
-      </div>
-      <label id="upload-btn">เปิด PDF<input id="file-input" type="file" accept=".pdf"></label>
-      <div id="open-project-wrap" style="position:relative;display:inline-flex"><button class="tb" id="top-open-project" onclick="openProjectBtnClick()" style="cursor:pointer">เปิด Project</button><input id="proj-input" type="file" accept=".bmaplan" style="display:none"><div id="recent-proj-dropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px 0;box-shadow:0 4px 16px rgba(0,0,0,.4);min-width:200px;max-width:300px;z-index:10000"></div></div>
-      <button class="tb" id="btn-sample-pdf" onclick="openSamplePdf()">ตัวอย่าง</button>
-      <div class="sep"></div>
-      <button class="tb" id="btn-scale-current" title="Set Scale Current Page" onclick="if(totalPages)setMode('calib');else alert('เปิด PDF ก่อน')">Set Scale</button>
-      <button class="tb" id="btn-setup" title="Page Setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">Page Setup</button>
+  <div class="title-bar">
+    <div class="win-btn close"></div>
+    <div class="win-btn min"></div>
+    <div class="win-btn max"></div>
+    <div class="title-bar-label">BMA-Plan — <span id="file-info">ยังไม่มีไฟล์</span></div>
+  </div>
+  <div class="menu-bar" id="menuBar">
+    <div class="app-logo">BMA</div>
+    <div class="menu-item" data-menu="file">File</div>
+    <div class="menu-item" data-menu="edit">Edit</div>
+    <div class="menu-item" data-menu="view">View</div>
+    <div class="menu-item" data-menu="project">Project</div>
+    <div class="menu-item" data-menu="scale">Scale</div>
+    <div class="menu-item" data-menu="page">Page</div>
+    <div class="menu-item" data-menu="measure">Measure</div>
+    <div class="menu-item" data-menu="object">Object</div>
+    <div class="menu-item" data-menu="layer">Layer</div>
+    <div class="menu-item" data-menu="review">Review</div>
+    <div class="menu-item" data-menu="export">Export</div>
+    <div class="menu-item" data-menu="workspace">Workspace</div>
+    <div class="menu-item" data-menu="help">Help</div>
+    <div class="menu-item phase-badge">Phase 1 · Measurement Only</div>
+  </div>
+  <div class="ribbon" id="ribbon">
+    <div class="ribbon-group">
+      <label class="rbtn" id="upload-btn">📂<span class="rbtn-lbl">เปิด PDF</span><input id="file-input" type="file" accept=".pdf" style="display:none"></label>
+      <div id="open-project-wrap" style="position:relative;display:inline-flex"><button class="rbtn" id="top-open-project" onclick="openProjectBtnClick()">📁<span class="rbtn-lbl">Project</span></button><input id="proj-input" type="file" accept=".bmaplan" style="display:none"><div id="recent-proj-dropdown" style="display:none;position:absolute;top:calc(100% + 2px);left:0;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px 0;box-shadow:0 4px 16px rgba(0,0,0,.4);min-width:200px;max-width:300px;z-index:10000"></div></div>
+      <button class="rbtn" id="btn-sample-pdf" onclick="openSamplePdf()">📄<span class="rbtn-lbl">ตัวอย่าง</span></button>
+      <button class="rbtn topbar-save" onclick="saveProject()">💾<span class="rbtn-lbl">Save</span></button>
     </div>
-    <div class="topbar-zone topbar-zone-b">
-      <button class="tb" id="btn-prev" onclick="const p=getPrevPage(curPage);if(p)loadPage(p)">◀</button>
-      <span id="page-lbl" style="font-size:12px;color:var(--text);min-width:54px;text-align:center;font-weight:600">— / —</span>
-      <button class="tb" id="btn-next" onclick="const n=getNextPage(curPage);if(n)loadPage(n)">▶</button>
-      <div class="topbar-group" id="zoom-bar">
-        <button class="tb" onclick="adjustZoom(1.3)">+</button>
-        <span id="zoom-val">100%</span>
-        <button class="tb" onclick="adjustZoom(1/1.3)">−</button>
-        <button class="tb" onclick="fitToWindow()">Fit</button>
-      </div>
-      <button class="tb" onclick="rotatePage(-90)">↺</button>
-      <button class="tb" onclick="rotatePage(90)">↻</button>
+    <div class="ribbon-group">
+      <button class="rbtn" id="btn-scale-current" onclick="if(totalPages)setMode('calib');else alert('เปิด PDF ก่อน')">∕<span class="rbtn-lbl">Set Scale</span></button>
+      <button class="rbtn" id="btn-scale-mgr" onclick="if(totalPages)openScaleManager();else alert('เปิด PDF ก่อน')">📐<span class="rbtn-lbl">Scale Mgr</span></button>
+      <span id="scale-badge">ยังไม่ตั้ง Scale</span>
+    </div>
+    <div class="ribbon-group">
+      <button class="rbtn" id="btn-prev" onclick="const p=getPrevPage(curPage);if(p)loadPage(p)">◀</button>
+      <span id="page-lbl" style="font-size:11px;color:var(--text2);min-width:54px;text-align:center">— / —</span>
+      <button class="rbtn" id="btn-next" onclick="const n=getNextPage(curPage);if(n)loadPage(n)">▶</button>
+      <div class="ribbon-sep"></div>
+      <button class="rbtn" id="btn-setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">⚙<span class="rbtn-lbl">Setup</span></button>
+      <div class="ribbon-sep"></div>
+      <button class="rbtn" onclick="adjustZoom(1.3)">+</button>
+      <span id="zoom-val" style="font-size:10px;color:var(--text2);min-width:36px;text-align:center">100%</span>
+      <button class="rbtn" onclick="adjustZoom(1/1.3)">−</button>
+      <button class="rbtn" onclick="fitToWindow()">⊡</button>
+      <button class="rbtn" onclick="rotatePage(-90)">↺</button>
+      <button class="rbtn" onclick="rotatePage(90)">↻</button>
       <span id="rot-badge" style="font-size:11px;color:var(--text2);display:none"></span>
     </div>
-    <div class="topbar-zone topbar-zone-c">
-      <span id="scale-badge">ยังไม่มีไฟล์</span>
-      <button class="tb topbar-save" onclick="saveProject()">Save</button>
-      <button class="tb" id="btn-report" onclick="openCheckPanel()">สรุป</button>
-      <button class="tb" id="btn-export-report" onclick="openExportPanel()">Export รายงาน</button>
-      <span id="status"></span>
+    <div class="ribbon-group">
+      <button class="rbtn active" id="btn-pan" onclick="setMode('pan')">✋<span class="rbtn-lbl">Pan</span></button>
+      <button class="rbtn" id="btn-sel" onclick="setMode('sel')">↖<span class="rbtn-lbl">เลือก</span></button>
+      <div class="ribbon-sep"></div>
+      <button class="rbtn" id="btn-area" onclick="activateAreaTool('room')">⬡<span class="rbtn-lbl">พื้นที่</span></button>
+      <button class="rbtn" id="btn-opening" onclick="toggleOpening()">□<span class="rbtn-lbl">ช่องเปิด</span></button>
+      <button class="rbtn" id="btn-parcel-boundary" onclick="activateAreaTool('land')">▱<span class="rbtn-lbl">ที่ดิน</span></button>
+      <button class="rbtn" id="btn-dist" onclick="setMode('dist')">↔<span class="rbtn-lbl">ระยะ</span></button>
+      <button class="rbtn" id="btn-north" onclick="setMode('north')">↑N<span class="rbtn-lbl">เหนือ</span></button>
+      <button class="rbtn" id="btn-ref" onclick="setMode('ref')">⌁<span class="rbtn-lbl">อ้างอิง</span></button>
+      <button class="rbtn" id="btn-calib" onclick="setMode('calib')">∕<span class="rbtn-lbl">Calib</span></button>
     </div>
-  </div>
-  <div id="tool-row"><div id="float-toolbar" aria-label="Measurement toolbar">
-    <div class="ft-group" id="toolbar-primary" aria-label="Primary drawing tools">
-      <button class="ft-btn active" id="btn-pan" onclick="setMode('pan')"><span class="ft-icon">✋</span><span class="ft-label optional">Pan</span></button>
-      <button class="ft-btn" id="btn-sel" onclick="setMode('sel')"><span class="ft-icon">↖</span><span class="ft-label">เลือก</span></button>
-      <div class="ft-sep"></div>
-      <button class="ft-btn" id="btn-area" onclick="activateAreaTool('room')"><span class="ft-icon">⬡</span><span class="ft-label">พื้นที่</span></button>
-      <button class="ft-btn" id="btn-opening" onclick="toggleOpening()"><span class="ft-icon">□</span><span class="ft-label">ช่องเปิด</span></button>
-      <button class="ft-btn" id="btn-parcel-boundary" onclick="activateAreaTool('land')"><span class="ft-icon">▱</span><span class="ft-label">ที่ดิน</span></button>
-      <div class="ft-sep"></div>
-      <button class="ft-btn" id="btn-ref" onclick="setMode('ref')"><span class="ft-icon">⌁</span><span class="ft-label">อ้างอิง</span></button>
-      <button class="ft-btn" id="btn-dist" onclick="setMode('dist')"><span class="ft-icon">↔</span><span class="ft-label">ระยะ</span></button>
-      <button class="ft-btn" id="btn-calib" onclick="setMode('calib')"><span class="ft-icon">∕</span><span class="ft-label">Scale</span></button>
-      <div class="ft-sep"></div>
-      <button class="ft-btn" id="btn-north" onclick="setMode('north')"><span class="ft-icon">↑N</span><span class="ft-label">เหนือ</span></button>
-    </div>
-    <div class="ft-sep"></div>
-    <div class="ft-group" id="toolbar-layer" aria-label="Active layer">
-      <select id="active-layer-select" class="ft-btn" style="max-width:132px" onchange="setActiveLayer(this.value)" title="เลือก layer สำหรับ object ใหม่">
+    <div class="ribbon-group">
+      <select id="active-layer-select" class="rbtn" style="min-width:110px;padding:2px 6px" onchange="setActiveLayer(this.value)">
         <option value="sub_area">Layer: พื้นที่ย่อย</option>
         <option value="base_area">Layer: พื้นที่หลัก</option>
         <option value="deduction">Layer: ช่องเปิด</option>
         <option value="reference_geometry">Layer: อ้างอิง</option>
       </select>
+      <div class="ribbon-sep"></div>
+      <button class="rbtn" id="btn-undo" onclick="undo()">↶<span class="rbtn-lbl">Undo</span></button>
+      <button class="rbtn" id="btn-redo" onclick="redo()">↷<span class="rbtn-lbl">Redo</span></button>
+      <button class="rbtn danger" id="btn-delete-selected" onclick="deleteSelectedObject()">⌫<span class="rbtn-lbl">ลบ</span></button>
     </div>
-    <div class="ft-sep"></div>
-    <div class="ft-group" id="toolbar-edit" aria-label="Edit actions">
-      <button class="ft-btn" id="btn-undo" onclick="undo()"><span class="ft-icon">↶</span><span class="ft-label optional">Undo</span></button>
-      <button class="ft-btn" id="btn-redo" onclick="redo()"><span class="ft-icon">↷</span><span class="ft-label optional">Redo</span></button>
-      <button class="ft-btn danger" id="btn-delete-selected" onclick="deleteSelectedObject()"><span class="ft-icon">⌫</span><span class="ft-label optional">ลบ</span></button>
+    <div class="ribbon-group">
+      <button class="rbtn" id="btn-report" onclick="openCheckPanel()">📊<span class="rbtn-lbl">Review</span></button>
+      <button class="rbtn success" id="btn-export-report" onclick="openExportPanel()">📤<span class="rbtn-lbl">Export</span></button>
     </div>
-    <div class="ft-sep"></div>
-    <div class="toolbar-more-wrap" id="toolbar-more">
-      <button class="ft-btn" id="toolbar-more-btn" onclick="toggleToolbarMore(event)">เพิ่มเติม ▾</button>
-      <div id="toolbar-more-menu" aria-label="เครื่องมือเพิ่มเติม">
-        <div class="more-section">
-          <div class="more-section-title">เครื่องมือเพิ่มเติม</div>
-          <button class="ft-btn" id="btn-path" onclick="setMode('path')">〽 ระยะต่อเนื่อง</button>
-          <button class="ft-btn" id="btn-refdist" onclick="toggleRefDistance()">↔ ถึง Ref</button>
-          <button class="ft-btn" id="btn-perp" onclick="togglePerp()">⊥ ตั้งฉาก</button>
-          <select id="ref-type" class="ft-btn" onchange="curRefType=this.value">
-            <option value="road">ถนน</option><option value="canal">คลอง</option><option value="property">เขตที่ดิน</option><option value="wall">ผนัง</option><option value="grid">แกน</option><option value="custom">อื่นๆ</option>
-          </select>
-          <button class="ft-btn" id="btn-parking" onclick="setMode('parking')">🚗 ที่จอด</button>
-          <select id="parking-type" class="ft-btn" onchange="curParkingType=this.value">
-            <option value="car">รถยนต์</option><option value="ev">EV</option><option value="disabled">ผู้พิการ</option><option value="motorcycle">มอเตอร์ไซค์</option><option value="service">บริการ</option>
-          </select>
-          <button class="ft-btn" id="btn-ortho" onclick="toggleOrtho()" title="ล็อก 0°/90° ตลอด (เปิด = ortho mode)">⊖ ตั้งฉาก</button>
-          <button class="ft-btn" id="btn-land-edge" onclick="openSelectedLandEdgePanel()" style="display:none">ด้านที่ดิน</button>
-          <button class="ft-btn" id="btn-setbackdist" onclick="toggleSetbackDistance()" style="display:none">ระยะช่วยวัด</button>
-        </div>
-        <div class="more-section">
-          <div class="more-section-title">มุมมองและงานหน้า</div>
-          <button class="ft-btn" id="btn-loupe" onclick="toggleLoupe()" title="เปิด/ปิดแว่นขยาย (ใช้ขณะวาด)">🔍 แว่น</button>
-          <button class="ft-btn" onclick="resizeLoupe(-20)" title="แว่นเล็กลง">− เล็กลง</button>
-          <span id="lbl-loupe-r" class="ft-btn" style="justify-content:center;color:var(--text2)">160px</span>
-          <button class="ft-btn" onclick="resizeLoupe(+20)" title="แว่นใหญ่ขึ้น">+ ใหญ่ขึ้น</button>
-          <button class="ft-btn danger more-wide" id="btn-clear-measures" onclick="clearMeasures()">🗑 ล้าง</button>
-        </div>
+    <span id="status" style="margin-left:auto;font-size:11px;color:var(--text2);padding:0 8px;align-self:center"></span>
+  </div>
+  <div id="hidden-controls" style="display:none">
+    <button id="btn-path" onclick="setMode('path')"></button>
+    <button id="btn-refdist" onclick="toggleRefDistance()"></button>
+    <button id="btn-perp" onclick="togglePerp()"></button>
+    <select id="ref-type" onchange="curRefType=this.value"><option value="road">ถนน</option><option value="canal">คลอง</option><option value="property">เขตที่ดิน</option><option value="wall">ผนัง</option><option value="grid">แกน</option><option value="custom">อื่นๆ</option></select>
+    <button id="btn-parking" onclick="setMode('parking')"></button>
+    <select id="parking-type" onchange="curParkingType=this.value"><option value="car">รถยนต์</option><option value="ev">EV</option><option value="disabled">ผู้พิการ</option><option value="motorcycle">มอเตอร์ไซค์</option><option value="service">บริการ</option></select>
+    <button id="btn-ortho" onclick="toggleOrtho()"></button>
+    <button id="btn-land-edge" onclick="openSelectedLandEdgePanel()"></button>
+    <button id="btn-setbackdist" onclick="toggleSetbackDistance()"></button>
+    <button id="btn-loupe" onclick="toggleLoupe()"></button>
+    <span id="lbl-loupe-r">160px</span>
+    <button id="btn-clear-measures" onclick="clearMeasures()"></button>
+  </div>
+  <div id="main" class="main">
+    <div id="sidebar" class="left-panel">
+      <div class="panel-tabs">
+        <div class="sidebar-mode-tab panel-tab active" data-mode="sheets" onclick="setSidebarMode('sheets')">Sheets</div>
+        <div class="sidebar-mode-tab panel-tab" data-mode="objects" onclick="setSidebarMode('objects')">Objects</div>
+        <div class="sidebar-mode-tab panel-tab" data-mode="properties" onclick="setSidebarMode('properties')">Properties</div>
       </div>
-    </div>
-  </div></div>
-  <div id="main">
-    <div id="sidebar">
-      <div id="sidebar-header"><h2>Sheets</h2><span id="sidebar-count" style="font-size:10px;color:var(--text3)"></span></div>
       <div id="lp-page-info" class="lp-page-info"></div>
-      <div class="sidebar-mode-tabs" aria-label="Left panel sections">
-        <div class="sidebar-mode-tab active" data-mode="sheets" onclick="setSidebarMode('sheets')">Sheets</div>
-        <div class="sidebar-mode-tab" data-mode="objects" onclick="setSidebarMode('objects')">Objects</div>
-        <div class="sidebar-mode-tab" data-mode="properties" onclick="setSidebarMode('properties')">Properties</div>
-      </div>
-      <div class="sidebar-scroll-body">
+      <div class="panel-body sidebar-scroll-body">
       <input type="text" id="search-input" placeholder="🔍 ค้นหาหน้า..." oninput="filterPages(this.value)">
       <div id="sidebar-content"></div>
       <div id="lp-objects-content" style="display:none;padding:4px 0"></div>
@@ -128,18 +121,18 @@
       </div>
       </div>
     </div>
-    <div id="workspace">
+    <div id="workspace" class="canvas-wrap">
       <div id="empty-state"><div class="empty-card" style="pointer-events:auto"><h3>BMA-Plan</h3><p style="margin-bottom:14px">วัดพื้นที่จาก PDF สำหรับงานออกแบบ</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px"><button onclick="document.getElementById('file-input').click()" style="height:34px;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer">📂 เปิด PDF</button><button onclick="openSamplePdf()" style="height:34px;background:var(--surface3);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 12px;font-size:12px;cursor:pointer">ตัวอย่าง</button><button onclick="document.getElementById('proj-input').click()" style="height:34px;background:var(--surface3);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 12px;font-size:12px;cursor:pointer">📂 Project</button></div><p style="font-size:11px;color:var(--text3)">1 เปิด PDF &rarr; 2 Set Scale &rarr; 3 Page Setup &rarr; 4 Measure &rarr; 5 Review &rarr; 6 Export</p></div></div>
       <div id="scale-notice" class="scale-notice"><div style="flex:1"><div class="scale-notice-title" id="scale-notice-title">ยังไม่ได้ตั้ง Scale</div><div class="scale-notice-desc" id="scale-notice-desc">ค่าพื้นที่ยังใช้จริงไม่ได้</div></div><button onclick="setMode('calib')">ตั้ง Scale</button></div>
       <div id="canvas-top-bar" class="canvas-top-bar" aria-label="Canvas page status"></div>
       <div id="cc"><canvas id="canvas"></canvas></div>
     </div>
-    <aside id="right-panel">
+    <aside id="right-panel" class="right-panel">
       <div id="rp-header"><h2>Layers</h2></div>
       <div id="rp-content"><div class="rp-empty">เปิด PDF แล้วเลือกหรือวาด object เพื่อดูรายละเอียด</div></div>
     </aside>
   </div>
-  <div id="bottombar">
+  <div id="bottombar" class="status-bar">
     <span class="bb-item">Tool: <span class="bb-val" id="lbl-mode">Pan</span></span>
     <span class="bb-item">Scale: <span class="bb-val" id="lbl-scale">—</span></span>
     <span class="bb-item">Objects: <span class="bb-val" id="lbl-objects">0</span></span>

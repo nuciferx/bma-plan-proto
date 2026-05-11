@@ -1638,7 +1638,7 @@ def _test_menu_power_up(page):
         }
         return out;
     }""")
-    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 21, "object": 7, "layer": 11}
+    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 22, "object": 7, "layer": 11}
     menuStructureOk = all(menu_counts.get(m) == expected_counts[m] for m in expected_counts)
 
     # ── 2. No disabled items ─────────────────────────────────────────────────
@@ -1782,6 +1782,39 @@ def _test_menu_power_up(page):
         return {fnExists, modeAfterActivate, areaOk, fourVerts, area: area};
     }""")
 
+    # ── H.1.4: Ellipse tool ──────────────────────────────────────────────────
+    ellipse_tool = page.evaluate("""() => {
+        const fnExists = typeof activateEllipseTool === 'function';
+        activateEllipseTool('room');
+        const modeAfterActivate = mode;
+        const scale = getScaleForPage(curPage);
+        if (!scale) { setMode('pan'); return {fnExists, modeAfterActivate, skipped:true}; }
+        const before = mPolys.length;
+        // bounding box 10m × 6m → semiAxisA = 5m, semiAxisB = 3m
+        const a_pt = 10 * scale.pts_per_m, b_pt = 6 * scale.pts_per_m;
+        const cx = a_pt / 2, cy = b_pt / 2;
+        mPts = _ellipsePolygonPts({x: cx, y: cy}, a_pt/2, b_pt/2, 32);
+        finishCurrentArea();
+        const after = mPolys.length;
+        const newPoly = mPolys[after - 1];
+        if (newPoly) {
+            newPoly.shape='ellipse';
+            newPoly.center={x:cx,y:cy};
+            newPoly.semiAxisA=a_pt/2;
+            newPoly.semiAxisB=b_pt/2;
+            newPoly.rotation=0;
+        }
+        const isEllipse = newPoly && newPoly.shape === 'ellipse';
+        const has32 = newPoly && newPoly.pts && newPoly.pts.length === 32;
+        const area = newPoly ? objectAreaM2(newPoly) : null;
+        const expectedArea = Math.PI * 5 * 3;
+        const areaOk = area != null && Math.abs(area - expectedArea) < 0.01;
+        const np = document.getElementById('name-panel'); if (np) np.style.display = 'none';
+        setMode('pan');
+        if (after > before) mPolys.pop();
+        return {fnExists, modeAfterActivate, isEllipse, has32, areaOk, area, expectedArea};
+    }""")
+
     # ── H.1.3: Circle tool ───────────────────────────────────────────────────
     circle_tool = page.evaluate("""() => {
         const fnExists = typeof activateCircleTool === 'function';
@@ -1862,6 +1895,7 @@ def _test_menu_power_up(page):
         "curvesMath": curves_math,
         "rectTool": rect_tool,
         "circleTool": circle_tool,
+        "ellipseTool": ellipse_tool,
     }
 
 

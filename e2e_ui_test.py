@@ -1751,6 +1751,37 @@ def _test_menu_power_up(page):
         vis_p1_after = page.evaluate("() => layerVis.base_area")
         perPageLayerMemoryFixed = vis_p1_before is False and vis_p1_after is False
 
+    # ── H.1.1: Curves area math (additive — does not touch polyAreaM2) ───────
+    curves_math = page.evaluate("""() => {
+        const calibrated = typeof getScaleForPage === 'function' && !!getScaleForPage(curPage);
+        if (!calibrated) return {skipped: true};
+        const fnsExist = ['circleAreaM2','ellipseAreaM2','arcSegmentAreaM2','polygonAreaWithArcsM2','objectAreaM2']
+            .every(n => typeof window[n] === 'function');
+        const pts_per_m = getScaleForPage(curPage).pts_per_m;
+        const r_pt = 100 * pts_per_m;
+        const expectedCircle = Math.PI * 100 * 100;
+        const gotCircle = circleAreaM2(r_pt);
+        const circleOk = gotCircle != null && Math.abs(gotCircle - expectedCircle) < 0.01;
+        const a_pt = 100 * pts_per_m, b_pt = 50 * pts_per_m;
+        const expectedEllipse = Math.PI * 100 * 50;
+        const gotEllipse = ellipseAreaM2(a_pt, b_pt);
+        const ellipseOk = gotEllipse != null && Math.abs(gotEllipse - expectedEllipse) < 0.01;
+        const semi = arcSegmentAreaM2(2 * pts_per_m, Math.PI);
+        const semiExpected = Math.PI * 1 * 1 / 2;
+        const arcOk = semi != null && Math.abs(semi - semiExpected) < 0.05;
+        const zeroSweep = arcSegmentAreaM2(10 * pts_per_m, 0);
+        const arcZeroOk = zeroSweep === 0;
+        const square = {pts:[{x:0,y:0},{x:10*pts_per_m,y:0},{x:10*pts_per_m,y:10*pts_per_m},{x:0,y:10*pts_per_m}]};
+        const squareArea = polyAreaM2(square.pts);
+        const objSquareArea = objectAreaM2(square);
+        const objSquareOk = Math.abs(squareArea - objSquareArea) < 0.001 && Math.abs(squareArea - 100) < 0.001;
+        const objCircle = objectAreaM2({shape:'circle', radius: r_pt});
+        const objCircleOk = Math.abs(objCircle - expectedCircle) < 0.01;
+        const objEllipse = objectAreaM2({shape:'ellipse', semiAxisA: a_pt, semiAxisB: b_pt});
+        const objEllipseOk = Math.abs(objEllipse - expectedEllipse) < 0.01;
+        return {fnsExist, circleOk, ellipseOk, arcOk, arcZeroOk, objSquareOk, objCircleOk, objEllipseOk};
+    }""")
+
     return {
         "menuCounts": menu_counts,
         "menuStructureOk": menuStructureOk,
@@ -1767,6 +1798,7 @@ def _test_menu_power_up(page):
         "selectAllInLayerWorks": selectAllInLayerWorks,
         "validatePolygonsWarns": validatePolygonsWarns,
         "perPageLayerMemoryFixed": perPageLayerMemoryFixed,
+        "curvesMath": curves_math,
     }
 
 

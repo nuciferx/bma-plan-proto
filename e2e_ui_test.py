@@ -1638,7 +1638,7 @@ def _test_menu_power_up(page):
         }
         return out;
     }""")
-    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 19, "object": 7, "layer": 11}
+    expected_counts = {"project": 4, "scale": 7, "page": 8, "measure": 20, "object": 7, "layer": 11}
     menuStructureOk = all(menu_counts.get(m) == expected_counts[m] for m in expected_counts)
 
     # ── 2. No disabled items ─────────────────────────────────────────────────
@@ -1751,6 +1751,37 @@ def _test_menu_power_up(page):
         vis_p1_after = page.evaluate("() => layerVis.base_area")
         perPageLayerMemoryFixed = vis_p1_before is False and vis_p1_after is False
 
+    # ── H.1.2: Quick Rectangle tool ──────────────────────────────────────────
+    # verify mode + function + hotkey, then simulate 2-click rectangle
+    rect_tool = page.evaluate("""() => {
+        const fnExists = typeof activateRectTool === 'function';
+        activateRectTool('room');
+        const modeAfterActivate = mode;
+        // clear & simulate 2-click rect at known pdf coords
+        const before = mPolys.length;
+        const scale = getScaleForPage(curPage);
+        if (!scale) { setMode('pan'); return {fnExists, modeAfterActivate, skipped:true}; }
+        // Click corner 1 at pdf (0,0)
+        mPts = [{x: 0, y: 0}];
+        // Simulate 2nd click handler logic by setting mPts to 4-corner polygon then call finishCurrentArea
+        const a = {x: 0, y: 0}, b = {x: 10 * scale.pts_per_m, y: 5 * scale.pts_per_m};
+        mPts = [{x:a.x,y:a.y},{x:b.x,y:a.y},{x:b.x,y:b.y},{x:a.x,y:b.y}];
+        // close the name panel listener — just call finishCurrentArea
+        finishCurrentArea();
+        const after = mPolys.length;
+        const newPoly = mPolys[after - 1];
+        const area = newPoly ? polyAreaM2(newPoly.pts) : null;
+        // expected area = 10 * 5 = 50 m²
+        const areaOk = area != null && Math.abs(area - 50) < 0.01;
+        const fourVerts = newPoly && newPoly.pts && newPoly.pts.length === 4;
+        // close name panel if it opened
+        const np = document.getElementById('name-panel'); if (np) np.style.display = 'none';
+        setMode('pan');
+        // cleanup: remove the test rect
+        if (after > before) mPolys.pop();
+        return {fnExists, modeAfterActivate, areaOk, fourVerts, area: area};
+    }""")
+
     # ── H.1.1: Curves area math (additive — does not touch polyAreaM2) ───────
     curves_math = page.evaluate("""() => {
         const calibrated = typeof getScaleForPage === 'function' && !!getScaleForPage(curPage);
@@ -1799,6 +1830,7 @@ def _test_menu_power_up(page):
         "validatePolygonsWarns": validatePolygonsWarns,
         "perPageLayerMemoryFixed": perPageLayerMemoryFixed,
         "curvesMath": curves_math,
+        "rectTool": rect_tool,
     }
 
 

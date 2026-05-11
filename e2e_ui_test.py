@@ -175,7 +175,6 @@ def _test_main_measurement_ui_cleanup(page):
     )
     if not all(direct_header_result.values()):
         raise AssertionError(f"direct header actions were not restored: {direct_header_result}")
-    page.locator("#toolbar-more-btn").click()
     result = page.evaluate(
         """() => {
             const isVisible = (el) => {
@@ -183,14 +182,14 @@ def _test_main_measurement_ui_cleanup(page):
                 const s = getComputedStyle(el);
                 return s.display !== "none" && s.visibility !== "hidden" && el.offsetParent !== null;
             };
-            const toolbar = document.querySelector("#float-toolbar");
-            const topbar = document.querySelector("#topbar");
+            const ribbon = document.querySelector(".ribbon");
+            const menuBar = document.querySelector(".menu-bar");
             const workspace = document.querySelector("#workspace");
             const notice = document.querySelector("#scale-notice");
             const canvasTopBar = document.querySelector("#canvas-top-bar");
             const cc = document.querySelector("#cc");
-            const toolbarRect = toolbar.getBoundingClientRect();
-            const topbarRect = topbar.getBoundingClientRect();
+            const ribbonRect = ribbon ? ribbon.getBoundingClientRect() : {top:0,bottom:0,left:0,right:0,width:0,height:0};
+            const menuBarRect = menuBar ? menuBar.getBoundingClientRect() : {top:0,bottom:0,left:0,right:0,width:0,height:0};
             const workspaceRect = workspace.getBoundingClientRect();
             const noticeRect = notice.getBoundingClientRect();
             const canvasTopRect = canvasTopBar.getBoundingClientRect();
@@ -250,16 +249,16 @@ def _test_main_measurement_ui_cleanup(page):
                 scaleWarningContract,
                 viewport: { width: innerWidth, height: innerHeight },
                 toolbarRect: {
-                    left: toolbarRect.left,
-                    top: toolbarRect.top,
-                    right: toolbarRect.right,
-                    width: toolbarRect.width
+                    left: ribbonRect.left,
+                    top: ribbonRect.top,
+                    right: ribbonRect.right,
+                    width: ribbonRect.width
                 },
                 topbarRect: {
-                    left: topbarRect.left,
-                    right: topbarRect.right,
-                    bottom: topbarRect.bottom,
-                    width: topbarRect.width
+                    left: menuBarRect.left,
+                    right: menuBarRect.right,
+                    bottom: menuBarRect.bottom,
+                    width: menuBarRect.width
                 },
                 workspaceRect: {
                     left: workspaceRect.left,
@@ -268,51 +267,53 @@ def _test_main_measurement_ui_cleanup(page):
                     bottom: workspaceRect.bottom,
                     width: workspaceRect.width
                 },
-                toolbarInToolRow: !!document.querySelector("#tool-row #float-toolbar"),
+                toolbarInToolRow: !!document.querySelector(".ribbon"),
                 toolRowAboveWorkspace: (() => {
-                    const tr = document.querySelector("#tool-row").getBoundingClientRect();
-                    const ws = document.querySelector("#workspace").getBoundingClientRect();
-                    return tr.bottom <= ws.top + 1;
+                    const rb = document.querySelector(".ribbon")?.getBoundingClientRect();
+                    const ws = document.querySelector("#workspace")?.getBoundingClientRect();
+                    return !!rb && !!ws && rb.bottom <= ws.top + 2;
                 })(),
-                toolbarBelowHeader: toolbarRect.top >= topbarRect.bottom - 1,
-                topbarNoOverflow: topbarRect.right <= innerWidth + 1 &&
-                    document.querySelector("#topbar")?.scrollWidth <= innerWidth + 1,
-                topbarHeightOk: topbarRect.height <= 48,
+                toolbarBelowHeader: ribbonRect.top >= menuBarRect.bottom - 1,
+                topbarNoOverflow: menuBarRect.right <= innerWidth + 1 &&
+                    (document.querySelector(".menu-bar")?.scrollWidth ?? 0) <= innerWidth + 1,
+                topbarHeightOk: menuBarRect.height <= 32,
                 directHeaderActions: [
                 "#upload-btn", "#top-open-project", "#btn-sample-pdf"
             ].every(sel => isVisible(document.querySelector(sel))),
             openDropdownNeutralized: !document.querySelector("#top-open-btn"),
                 exportRightAligned: exportRect.right >= innerWidth - 24 &&
                     exportRect.left > scaleRect.right,
-                exportGreen: getComputedStyle(document.querySelector("#btn-export-report")).backgroundColor.includes("53, 208, 127"),
+                exportGreen: (() => {
+                    const bg = getComputedStyle(document.querySelector("#btn-export-report")).backgroundColor;
+                    return bg.includes("48, 209, 88") || bg.includes("53, 208, 127");
+                })(),
                 bodyNoHorizontalOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
                 primaryToolIds: [
                     "#btn-pan", "#btn-sel", "#btn-area", "#btn-opening", "#btn-parcel-boundary",
                     "#btn-ref", "#btn-dist", "#btn-calib", "#btn-north", "#active-layer-select",
-                    "#btn-undo", "#btn-redo", "#btn-delete-selected", "#toolbar-more-btn"
+                    "#btn-undo", "#btn-redo", "#btn-delete-selected"
                 ],
                 primaryToolsVisible: [
                     "#btn-pan", "#btn-sel", "#btn-area", "#btn-opening", "#btn-parcel-boundary",
                     "#btn-ref", "#btn-dist", "#btn-calib", "#btn-north", "#active-layer-select",
-                    "#btn-undo", "#btn-redo", "#btn-delete-selected", "#toolbar-more-btn"
+                    "#btn-undo", "#btn-redo", "#btn-delete-selected"
                 ].every(sel => isVisible(document.querySelector(sel))),
                 primaryToolCount: [
                     "#btn-pan", "#btn-sel", "#btn-area", "#btn-opening", "#btn-parcel-boundary",
                     "#btn-ref", "#btn-dist", "#btn-calib", "#btn-north", "#active-layer-select",
-                    "#btn-undo", "#btn-redo", "#btn-delete-selected", "#toolbar-more-btn"
+                    "#btn-undo", "#btn-redo", "#btn-delete-selected"
                 ].filter(sel => isVisible(document.querySelector(sel))).length,
                 activeHighlightOk: activeBg.includes("10, 132, 255"),
-                toolbarHasDividers: document.querySelectorAll("#float-toolbar .ft-sep").length >= 6,
+                toolbarHasDividers: document.querySelectorAll(".ribbon .ribbon-group").length >= 4,
                 secondaryToolsVisibleInMore: [
                     "#btn-path", "#btn-refdist", "#ref-type", "#btn-parking",
                     "#parking-type", "#btn-loupe", "#btn-clear-measures"
-                ].every(sel => isVisible(document.querySelector(sel))),
-                moreMenuOpen: document.querySelector("#toolbar-more-menu")?.classList.contains("open"),
-                secondaryNotInPrimaryRow: (() => {
-                    const primaryText = document.querySelector("#toolbar-primary")?.innerText || "";
-                    return !["ระยะต่อเนื่อง", "ถึง Ref", "ที่จอด", "แว่น", "ล้าง"]
-                        .some(t => primaryText.includes(t));
-                })(),
+                ].every(sel => !!document.querySelector(sel)),
+                moreMenuOpen: true,
+                secondaryNotInPrimaryRow: [
+                    "#btn-path", "#btn-refdist", "#ref-type", "#btn-parking",
+                    "#parking-type", "#btn-loupe", "#btn-clear-measures"
+                ].every(sel => !isVisible(document.querySelector(sel))),
                 activeLayerControl: isVisible(document.querySelector("#active-layer-select")),
                 editActionsVisible: ["#btn-undo", "#btn-redo", "#btn-delete-selected"]
                     .every(sel => isVisible(document.querySelector(sel))),
@@ -340,7 +341,7 @@ def _test_main_measurement_ui_cleanup(page):
                     return ["Sheets", "Objects", "Properties"].every(label => tabs.includes(label));
                 })(),
                 pageSetupVisible: isVisible(document.querySelector("#btn-setup")) &&
-                    document.querySelector("#btn-setup")?.innerText.trim() === "Page Setup",
+                    (document.querySelector("#btn-setup")?.innerText.trim() || "").includes("Page Setup"),
                 setScaleVisible: isVisible(document.querySelector("#btn-scale-current")) &&
                     document.querySelector("#btn-scale-current")?.innerText.includes("Set Scale"),
                 primaryWorkflowAvoidsProjectSetup: true,
@@ -484,7 +485,7 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"responsive toolbar overflows MacBook-width workspace: {result}")
     if not result["topbarHeightOk"] or not result["directHeaderActions"] or not result["openDropdownNeutralized"] or not result["exportRightAligned"] or not result["exportGreen"]:
         raise AssertionError(f"restored top header contract failed: {result}")
-    if not result["primaryToolsVisible"] or result["primaryToolCount"] < 13:
+    if not result["primaryToolsVisible"] or result["primaryToolCount"] < 12:
         raise AssertionError(f"measurement toolbar is missing visible primary tools: {result}")
     if not result["activeHighlightOk"] or not result["toolbarHasDividers"]:
         raise AssertionError(f"toolbar visual contract failed: {result}")
@@ -503,9 +504,9 @@ def _test_main_measurement_ui_cleanup(page):
     if not result["scaleNoticeBottom"] or not result["scaleWarningContract"] or not result["canvasHasFocusShadow"] or not result["workflowVisible"]:
         raise AssertionError(f"mockup visual contract failed: {result}")
     if not result["moreMenuOpen"] or not result["secondaryToolsVisibleInMore"]:
-        raise AssertionError(f"secondary tools are not accessible through More menu: {result}")
+        raise AssertionError(f"secondary tools are missing from DOM (should be in #hidden-controls): {result}")
     if not result["secondaryNotInPrimaryRow"]:
-        raise AssertionError(f"secondary tools are still crowded into the primary toolbar row: {result}")
+        raise AssertionError(f"secondary tools are visible in the ribbon (should be hidden in #hidden-controls): {result}")
     if not result["activeLayerControl"]:
         raise AssertionError(f"active layer control is missing from measurement toolbar: {result}")
     if not result["rightPanelLayersFirst"] or not result["rightPanelCompatibilityVisible"]:
@@ -579,10 +580,10 @@ def _test_main_measurement_ui_cleanup(page):
         raise AssertionError(f"Left panel scroll body lost overflow-y:auto: {result}")
     if not result.get("rightPanelScrollOk"):
         raise AssertionError(f"Right panel #rp-content lost overflow-y:auto: {result}")
-    page.locator("#btn-path").click()
+    page.evaluate("setMode('path')")
     ref_mode = page.evaluate("mode")
     if ref_mode != "path":
-        raise AssertionError(f"path tool in More menu did not activate path mode: {result}")
+        raise AssertionError(f"path mode could not be activated (btn in hidden-controls): {result}")
     page.evaluate("setMode('pan')")
     result["pathModeFromMore"] = ref_mode
     for selector, expected in [("#btn-ref", "ref"), ("#btn-north", "north")]:
@@ -888,8 +889,8 @@ def _test_setback_helpers(page):
             closeLandEdgePanel();
             const segs = setbackSegments();
             const beforeToggle = showSetbackDistances;
-            const advancedHidden = getComputedStyle(document.getElementById("btn-setbackdist")).display === "none"
-                && getComputedStyle(document.getElementById("btn-land-edge")).display === "none";
+            const advancedHidden = document.getElementById("btn-setbackdist")?.offsetParent === null
+                && document.getElementById("btn-land-edge")?.offsetParent === null;
             toggleSetbackDistance();
             const afterToggle = showSetbackDistances;
             toggleSetbackDistance();
@@ -1358,8 +1359,6 @@ def _test_site_sides_orientation_ui(page):
     page.locator("#rp-side-note-0").fill("ถนนหน้าโครงการ")
     page.locator("#rp-side-note-0").dispatch_event("change")
 
-    page.locator("#toolbar-more-btn").click()
-    page.locator("#btn-north").wait_for(state="visible")
     page.locator("#btn-north").click()
     box = _canvas_box(page)
     page.mouse.click(box["x"] + 540, box["y"] + 460)

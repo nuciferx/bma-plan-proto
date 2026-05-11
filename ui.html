@@ -48,7 +48,7 @@
       <span id="page-lbl" style="font-size:11px;color:var(--text2);min-width:54px;text-align:center">— / —</span>
       <button class="rbtn" id="btn-next" onclick="const n=getNextPage(curPage);if(n)loadPage(n)">▶</button>
       <div class="ribbon-sep"></div>
-      <button class="rbtn" id="btn-setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">⚙<span class="rbtn-lbl">Setup</span></button>
+      <button class="rbtn" id="btn-setup" onclick="if(totalPages)openSetup();else alert('เปิด PDF ก่อน')">⚙<span class="rbtn-lbl">Page Setup</span></button>
       <div class="ribbon-sep"></div>
       <button class="rbtn" onclick="adjustZoom(1.3)">+</button>
       <span id="zoom-val" style="font-size:10px;color:var(--text2);min-width:36px;text-align:center">100%</span>
@@ -461,7 +461,7 @@ function buildSidebar(){
     }).join('')}</div>`;
     content.appendChild(div);
   }
-  document.getElementById("sidebar-count").textContent=`${visibleCount} หน้า`;
+  const _sc=document.getElementById("sidebar-count");if(_sc)_sc.textContent=`${visibleCount} หน้า`;
 }
 function toggleGroup(gk){if(collapsedGroups.has(gk))collapsedGroups.delete(gk);else collapsedGroups.add(gk);buildSidebar();}
 function expandAllGroups(){collapsedGroups.clear();buildSidebar();}

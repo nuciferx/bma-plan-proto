@@ -1,7 +1,33 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+
+# PyInstaller build outputs
+build/
+dist/
+dist2/
+
+# Runtime exports
+export/
+
+# Server logs
+*.log
+
+# OS metadata
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Secrets / env
+.env
+
+# Generated/sample assets that drift
 *.pdf
 *.jpg
-*.png
 *.jpeg
-.env
+*.png
